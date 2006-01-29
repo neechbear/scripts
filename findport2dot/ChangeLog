@@ -1,0 +1,44 @@
+2002-12-23 15:08  nicolaw
+
+	* NetworkDiagram.pl, map.pl, theme.pl: [no log message]
+
+2002-12-20 17:54  nicolaw
+
+	* NetworkDiagram.pl: NL: Outputs 3 file formats
+
+2002-12-20 17:44  nicolaw
+
+	* NetworkDiagram.pl, map.pl, theme.pl: [no log message]
+
+2002-12-20 17:22  nicolaw
+
+	* NetworkDiagram.pl, map.pl, theme.pl: NL: Fixed a dodgy theme.pl
+
+2002-12-20 16:22  nicolaw
+
+	* NetworkDiagram.pl: [no log message]
+
+2002-12-20 16:13  nicolaw
+
+	* NetworkDiagram.pl, findport-mactab.pl, map.pl, theme.pl: [no log
+	message]
+
+2002-12-20 15:04  nicolaw
+
+	* NetworkDiagram.pl, findport2dot.pl, networkDot.sh, nodupes.pl:
+	NL: Merged several scripts in to 1
+
+2002-12-20 00:06  nicolaw
+
+	* findport2dot.pl, networkDot.sh: [no log message]
+
+2002-12-19 23:48  nicolaw
+
+	* findport2dot.pl, networkDot.sh, nodupes.pl, switchesDot.sh: [no
+	log message]
+
+2002-12-19 11:38  nicolaw
+
+	* findport2dot.pl, switchesDot.sh: NL: Can generate dot template
+	input from ./switchesDot.sh > output.dot
+

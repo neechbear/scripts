@@ -1,0 +1,470 @@
+#!/usr/bin/perl
+############################################################
+#
+#  nsmon - NetStat Connection Monitor Script
+#
+#  Author:    Nicola Worthington <nicolaworthington@msn.com>
+#  Version:   0.02
+#  Date:      2003-01-06
+#  Copyright: (c)2002 Nicola Worthington. All rights reserved.
+#
+############################################################
+
+### 2003-01-06 - nicolaw
+# Added POD documentation
+
+### 2002-11-21 - v0.02 - nicolaw
+# Added alert() mailer support
+
+### 2002-11-15 - v0.01 - nicolaw
+# First release
+
+use strict;
+package nsmon;
+use English;
+use Getopt::Long;
+use Net::Netmask;
+use POSIX 'uname';
+use Unix::Syslog qw(:subs :macros);
+
+use subs qw(report log alert);
+use vars qw($VERSION $MOI %C %A $CONFIG_FILE $DAEMON $CRON $VERBOSE @ISA @EXPORT_OK %IPSTATS @CONN $HOSTNAME);
+
+$WARNING = 1;
+$OUTPUT_AUTOFLUSH = 1;
+($MOI = $PROGRAM_NAME) =~ s|^.*/||;
+$VERSION = 0.02;
+$ENV{PATH} = '/bin:/usr/bin:/usr/local/bin';
+$HOSTNAME = (POSIX::uname())[1];
+
+$DAEMON = 0;
+$CRON = 0;
+$VERBOSE = 0;
+$CONFIG_FILE = '/etc/nsmon.conf';
+%A = (SUCCESS => '', FAILURE => '', WARNING => '', NORMAL => '');
+
+# Get command line options
+GetOptions(
+	'help'    => sub { display_help(0); },
+	'conf=s'  => \$CONFIG_FILE,
+	'cron'    => \$CRON,
+	'daemon'  => \$DAEMON,
+	'verbose' => \$VERBOSE,
+);
+
+# Read the config file and setup signal handlers
+%C = read_config($CONFIG_FILE);
+$SIG{'HUP'} = sub { log LOG_NOTICE, 'Recieved SIGHUP; reloading configuration'; %C = read_config($CONFIG_FILE); };
+$SIG{'USR1'} = sub { log LOG_NOTICE, 'Recieved SIGUSR1; checking connections immediately'; &check_connections; };
+
+# Run a single check and exit unless we need to spawn as a background daemon
+unless ($DAEMON) {
+	check_connections();
+	exit;
+}
+
+# Open syslog
+openlog $MOI, LOG_PID | LOG_PERROR, LOG_AUTHPRIV;
+#setlogmask(LOG_UPTO(LOG_DEBUG)) if $VERBOSE;
+
+# Check that we're not already running, and quit if we are
+if (-f "/var/run/$MOI.pid") {
+	open(PID,"/var/run/$MOI.pid") || report LOG_CRIT, "Unable to open file handle PID for file '/var/run/$MOI.pid': $!\n";
+	my $pid = <PID>;
+	close(PID) || report LOG_WARNING, "Unable to close file handle PID for file '/var/run/$MOI.pid': $!\n";
+	if (-f "/proc/$pid/stat") {
+		open(FH,"/proc/$pid/stat") || report LOG_WARNING, "Unable to open file handle FH for file '/proc/$pid/stat': $!\n";
+		my $line = <FH>;
+		close(FH) || report LOG_CRIT, "Unable to close file handle FH for file '/proc/$pid/stat': $!\n";
+		if ($line =~ /\d+[^(]*\((.*)\)\s*/) {
+			my $process = $1;
+			if ($process =~ /^$MOI$/) {
+				report LOG_NOTICE, "$MOI already running at PID $pid; exiting.\n" unless $CRON;
+				closelog;
+				exit(0);
+			}
+		}
+	} else {
+		report LOG_NOTICE, "Removing stale PID file.\n";
+		unlink("/var/run/$MOI.pid");
+	}
+}
+
+# Daemon parent about to spawn
+if (my $pid = fork) {
+	report LOG_NOTICE, "Spawning background daemon process $pid.\n";
+	closelog;
+	exit(0);
+
+# Child daemon process that was spawned
+} else {
+	report LOG_CRIT, "Cannot fork: $!\n" unless defined $pid;
+
+	open(FH,">/var/run/$MOI.pid") || report LOG_CRIT, "Unable to open file handle FH for file '/var/run/$MOI.pid': $!\n";
+	print FH $$;
+	close(FH) || report LOG_WARNING, "Unable to close file handle FH for file '/var/run/$MOI.pid': $!\n";
+
+	while (-f "/var/run/$MOI.pid") { # this process will die if you remove it's runtime pid file
+	check_connections();
+		my $sleep = 60;
+		$sleep = $C{frequency} if $C{frequency} && $C{frequency} =~ /^\d+$/;
+		sleep $sleep;
+	}
+	report LOG_NOTICE, "Terminating.\n";
+}
+
+# Finish
+closelog;
+exit;
+
+
+########################################
+# Subroutines
+
+sub check_connections {
+	%IPSTATS = ();
+
+	open(FH,'/proc/loadavg') || die "Unable to open file handle FH for file '/proc/loadavg': $!\n";
+	my @loadavg = split(/\s+/,<FH>);
+	chomp @loadavg;
+	close(FH) || die "Unable to close file handle FH for file '/proc/loadavg': $!\n";
+
+	my $regex = qr/^([a-z]+)\s+(\d+)\s+(\d+)\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)\s+([A-Z_]+)\s+(\S+)\s*$/;
+	open(NP,'/bin/netstat --inet -np|') || die "Unable to open pipe handle NP for command '/bin/netstat --inet -np|': $!\n";
+	while (local $_ = <NP>) {
+		next if /Not all processes could be|will not be shown, you would have|Active Internet connections|Proto Recv-Q Send-Q/i;
+		my %tmp;
+		if ((@tmp{qw/proto recv-q send-q local_addr local_port foreign_addr foreign_port state x/}) = m/$regex/) {
+			if ($tmp{x} =~ /^(\d+)\/(.+?)\s*$/) { @tmp{qw/pid proc_name/} = ($1,$2); }
+			delete $tmp{x};
+			#push @CONN,{%tmp};
+
+			unless (exists $IPSTATS{$tmp{foreign_addr}}) {
+				$IPSTATS{$tmp{foreign_addr}}->{connections} = 1;
+				$IPSTATS{$tmp{foreign_addr}}->{lc($tmp{proto})}->{connections} = 1;
+				$IPSTATS{$tmp{foreign_addr}}->{$tmp{local_port}}->{connections} = 1;
+				$IPSTATS{$tmp{foreign_addr}}->{lc($tmp{proto})}->{$tmp{local_port}}->{connections} = 1;
+			} else {
+				$IPSTATS{$tmp{foreign_addr}}->{connections}++;
+				$IPSTATS{$tmp{foreign_addr}}->{lc($tmp{proto})}->{connections}++;
+				$IPSTATS{$tmp{foreign_addr}}->{$tmp{local_port}}->{connections}++;
+				$IPSTATS{$tmp{foreign_addr}}->{lc($tmp{proto})}->{$tmp{local_port}}->{connections}++;
+			}
+		}
+	}
+	close(NP) || die "Unable to close pipe handle NP for command '/bin/netstat --inet -np|': $!\n";
+
+	foreach my $local_port (keys %{$C{monitor}}) {
+		my %C = %{$C{monitor}->{$local_port}};
+
+		next if exists $C{minsystemload} && $loadavg[0] < $C{minsystemload};
+
+		unless ($C{maxconnectionsperip} && $C{maxconnectionsperip} =~ /^\d+$/) {
+			report "A rule for local port '$local_port' has no MaxConnectionsPerIP defined; skipping!";
+			next;
+		}
+
+		IPCHECK: foreach my $foreign_addr (keys %IPSTATS) {
+			my %ipstats = %{$IPSTATS{$foreign_addr}};
+
+			my $connections;
+			if ("$local_port" eq '*') {
+				$connections = exists $C{protocol} ? $ipstats{lc($C{protocol})}->{connections}
+								: $ipstats{connections};
+			} else {
+				$connections = exists $C{protocol} ? $ipstats{lc($C{protocol})}->{$local_port}->{connections}
+								: $ipstats{$local_port}->{connections};
+			}
+			$connections ||= 0;
+
+			if ($connections > $C{maxconnectionsperip}) {
+				if (exists $C{ignore}) {
+					while (my ($k,$v) = each %{$C{ignore}}) { $v ||= 0;
+						next unless $v =~ /^\s*(yes|true|on|enable)\s*$/i;
+						my $block = new Net::Netmask($k);
+						next IPCHECK if $block->match($foreign_addr);
+					}
+	                        }
+				my $msg = "Foreign address $foreign_addr has triggered rule: maxconnectionsperip='$C{maxconnectionsperip}', connections='$connections', local_port='$local_port'";
+				$msg .= ", protocol='$C{protocol}'" if $C{protocol};
+				$msg .= ", minsystemload='$C{minsystemload}', loadavg='@loadavg'" if $C{minsystemload};
+				if ($C{action}) {
+					my $cmd = sprintf($C{action},$foreign_addr);
+					my $printcmd = printf("Executing '".$C{action}."'",$foreign_addr);
+					$A{MOVE_TO_COL} = ' 'x(60-10-length($printcmd)) unless $A{MOVE_TO_COL};
+					my $rtn = system($cmd);
+					unless ($rtn) {
+						print "$A{MOVE_TO_COL}\[$A{SUCCESS}  OK  $A{SUCCESS}\]\n";
+						log LOG_NOTICE, "Execution of '$cmd' succeeded";
+					} else {
+						print "$A{MOVE_TO_COL}\[$A{FAILURE}FAILED$A{NORMAL}\]\n";
+						log LOG_ERR, "Execution of '$cmd' failed";
+					}
+					my $mailto = $C{notifyemail} || 'noc@ftech,net';
+					alert $mailto, "[$MOI] Foreign address $foreign_addr triggered '$cmd' on $HOSTNAME", $msg;
+				} else {
+					report $msg;
+				}
+			}
+		}
+	}
+}
+
+# Report something to user and syslog
+sub alert {
+	my ($mailto,$subject,@ary) = @_;
+	open(MP,'|/usr/sbin/sendmail -t') || die "Unable to open pipe handle MP for command '|/usr/sbin/sendmail -t': $!\n";
+	print MP "To: $mailto\n";
+	print MP "Subject: $subject\n";
+	print MP "\n";
+	print MP "@ary\n";
+	close(MP) || die "Unable to close pipe handle MP for command '|/usr/sbin/sendmail -t': $!\n";
+	report LOG_NOTICE, "@ary";
+}
+sub log { do_report(0,@_); }
+sub report { do_report(1,@_); }
+
+sub do_report { # log() and report() child function
+	my ($TTYOUT,$LOG_TYPE,@msg) = @_;
+
+	# By default, do not attempt to print output
+	$TTYOUT = 0 unless defined $TTYOUT;
+	$TTYOUT = 0 unless $TTYOUT =~ /^0|1$/;
+
+	# Default to informational output
+	$LOG_TYPE = 0 unless defined $LOG_TYPE;
+	$LOG_TYPE = LOG_INFO unless $LOG_TYPE =~ /^[0-7]$/;
+
+	# Default empty output if undefined
+	@msg = '' unless @msg;
+	# unshift @msg,"[$MOI]";
+
+	# Send to syslog
+	syslog $LOG_TYPE, "@msg";
+	return unless $TTYOUT;
+	
+	if ($LOG_TYPE <= 2) { # LOG_EMERG, LOG_ALERT, LOG_CRIT 
+		die "@msg";
+	} elsif ($LOG_TYPE <= 5) { # LOG_ERR, LOG_WARN, LOG_NOTICE 
+		warn "@msg";
+	} else { # LOG_INFO, LOG_DEBUG 
+		print "@msg";
+	}
+}
+
+# Command line help
+sub display_help {
+        my $rtn = shift;
+
+        print <<__end__;
+Syntax: $MOI [--conf=filename] [--daemon] [--verbose] [--cron] [--help]
+    --help             Display this help
+    --conf filename    Specify alternative config filename
+    --daemon           Spawn in to background daemon
+    --verbose          Print and log extra verbose information
+    --cron             Disables already running warnings when
+                       trying to launch as another daemon
+__end__
+
+        exit($rtn) if defined $rtn;
+}
+
+# Read in the config
+sub read_config {
+        my $file = shift;
+        report LOG_CRIT, "Configuration file $file does not exist\n" unless -e $file;
+        open(FH,$file) || die "Unable to open configuration file $file: $!\n";
+        my %conf = slurp();
+        sub slurp {
+                my $closetype = shift;
+                my %foo;
+
+                while (<FH>) {
+                        next if (m!^\s*(#|//|;|\s*$)!); # Skip comments and empty lines
+                        if (/^\s*<\s*([^\/\s]+)(?:\s+(?:\"|\')?(.+?)(?:\"|\')?)?\s*>\s*$/) {
+                                #my ($type,$key) = (lc($1),lc($2));
+                                my ($type,$key) = (lc($1),$2);
+                                if ($key) { %foo->{$type}->{$key} = slurp($type); }
+                                else      { %foo->{$type}         = slurp($type); }
+                        } elsif (/^\s*(?:(?:\"|\')(.+?)(?:\"|\')|(\S+))\s+(?:\"|\')?(.+?)(?:\"|\')?\s*$/) {
+                                %foo->{lc($2)} = $3 if $2;
+                                %foo->{$1} = $3 if $1;
+                        } elsif (/^\s*<\s*\/\s*$closetype\s*>\s*$/i) {
+                                return \%foo;
+                        }
+                }
+
+                die "read_config() Error: '$closetype' scope directive is not closed\n" if $closetype;
+                return %foo;
+        }
+        close(FH) || report LOG_WARNING, "Unable to close configuration file $file: $!";
+        return %conf
+}
+ 
+       #define KERN_EMERG    "<0>"  /* system is unusable               */
+       #define KERN_ALERT    "<1>"  /* action must be taken immediately */
+       #define KERN_CRIT     "<2>"  /* critical conditions              */
+       #define KERN_ERR      "<3>"  /* error conditions                 */
+       #define KERN_WARNING  "<4>"  /* warning conditions               */
+       #define KERN_NOTICE   "<5>"  /* normal but significant condition */
+       #define KERN_INFO     "<6>"  /* informational                    */
+       #define KERN_DEBUG    "<7>"  /* debug-level messages             */
+
+__END__
+
+=head1 NAME
+
+nsmon - NetStat Connection Monitor Script
+
+=head1 SYNOPSIS
+
+    Syntax: nsmon [--conf=filename] [--daemon] [--verbose] [--cron] [--help]
+        --help             Display this help
+        --conf filename    Specify alternative config filename
+        --daemon           Spawn in to background daemon
+        --verbose          Print and log extra verbose information
+        --cron             Disables already running warnings when
+                           trying to launch as another daemon
+
+=head1 DESCRIPTION
+
+This script monitors inet connections using the external net-tools
+S<B<netstat>> binary, and will execute external commands based on a
+set of rules defined in an Apache style configuration file.
+
+Each ruleset in the configuration file may monitor a port number (or all ports),
+a protocol (or all protocols), and require a minimum system load to be met
+before any action is triggered.
+
+=head1 INSTALLATION
+
+The following Perl modules are required:
+
+    Getopt::Long
+    Net::Netmask
+    POSIX
+    Unix::Syslog
+
+The POSIX module is supplied with Perl as standard, as usually is
+Getopt::Long. These modules can be optained from CPAN. For the lazy
+and stupid people reading this, you can try the following commands
+to install these modules:
+
+    perl -MCPAN -e'install Getopt::Long'
+    perl -MCPAN -e'install Unix::Syslog'
+    perl -MCPAN -e'install POSIX'
+    perl -MCPAN -e'install Net::Netmask'
+
+=head1 CONFIGURATION
+
+The default configuration file location is /etc/nsmon.conf. A different
+configuration file can be declared from the command line.
+
+Syntax of the configuration file is based upon that which is used by
+Apache. Each port to be monitored is declared with a scope directive
+like this example which monitors external OpenSSH connections:
+
+    <Monitor 22>
+        Protocol        TCP
+        Action          /usr/local/bin/addevilnet %s
+        NotifyEmail     someadmin@yourdomain.com
+        MaxConnectionsPerIP     8
+        <Ignore>
+            127.0.0.0/8     True
+            172.16.0.0/16   True
+            192.168.0.0/12  True
+            10.0.0.0/8      True
+        </Ignore>
+    </Monitor>
+
+=head2 DIRECTIVES
+
+=over 4
+
+=item notifyemail
+
+Defines the email address where notification emails should be sent to. Defaults to noc@ftech.net.
+
+=item frequency
+
+Defines the the frequency of process table queries. Defaults to 60 seconds.
+
+=back
+
+=head2 MONITOR SCOPE DIRECTIVES
+
+The monitor scope statement defines which port number to monitor. However, you may use an asterisk * to indicate all or any port number(s).
+
+=over 4
+
+=item action
+
+Defines the full command line to be executed when the maximum number of matching concurrent connections is exceeded by any one foreign IP address. Use the %s (as per the C printf function) identified which will be replaced with the triggering foreign IP address.
+
+=item protocol
+
+Defines the inet protocol to monitor. For example TCP, UDP, ICMP etc. If omitted, all protocols will be monitored.
+
+=item maxconnectionsperip
+
+Defines the maximum number of matching concurrent connections allowed from any one foreign IP address. (Required)
+
+=item minsystemload
+
+Defines a minimum system load which must be met before any actions may be executed. (Optional)
+
+=item notifyemail
+
+Defines the email address where notification emails should be sent to. Defaults to noc@ftech.net.
+
+=back
+
+=head2 IGNORE SCOPE
+
+The ignore scope provides the ability to white-list a number of IP addresses from triggering action. Typically your localhost and trusted networks should be listed here. The syntax is:
+
+    Netblock    True
+
+For example, to white-list all non-routed and local IP ranges, you would add the following ignore scope to the monitor scope:
+
+    <Ignore>
+        127.0.0.0/8     True
+        172.16.0.0/16   True
+        192.168.0.0/12  True
+        10.0.0.0/8      True
+    </Ignore>
+
+Individual ranges can be disabled from the ignore white-list by changing the True flag to False.
+
+=head1 SIGNALS
+
+=over 4
+
+=item HUP
+
+Forces an immediate reload of the configuration file.
+
+=item USR1
+
+Forces an immediate scan of inet connections.
+
+=back
+
+=head1 BUGS
+
+Hopefully none. :-) Send any bug reports to me at nicolaw@perlguy.org.uk along with
+any patches and details of how to replicate the problem. Please only send
+reports for bugs which can be replicated in the B<latest> version of the
+software. The latest version can always be found at
+http://www.nicolaworthington.com
+
+=head1 SEE ALSO
+
+psmon
+
+=head1 AUTHOR
+
+Nicola Worthington <nicolaworthington@msn.com>
+
+http://www.nicolaworthington.com
+

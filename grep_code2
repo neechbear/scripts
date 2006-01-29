@@ -1,0 +1,10 @@
+#!/bin/bash
+
+for i in `find . -type f | egrep "\.(pm|pl|cgi)$"`
+do
+	echo ""
+	echo "$i"
+	/home/nicolaw/bin/gc $i
+	echo ""
+done
+

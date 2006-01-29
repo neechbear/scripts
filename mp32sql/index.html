@@ -1,0 +1,26 @@
+<%once>
+	use MP3::M3U::Parser;
+</%once>
+<%args>
+	$playlist_filename => undef
+</%args>
+<ul>
+% opendir(DH,$r->document_root().'/playlists/');
+% for my $filename (grep(/^[a-z0-9\_]+\.m3u$/i,readdir(DH))) {
+%	(my $title = $filename) =~ s/_/ /g; $title =~ s/\.m3u$//;
+%	my $parser = MP3::M3U::Parser->new(-seconds => 'format');
+%	$parser->parse(sprintf('%s/playlists/%s',$r->document_root(),$filename));
+%	my %info   = $parser->info;
+  <li><a href="/playlists/<% $filename %>"><% $title %></a> <% $info{songs} %> <a href="?playlist_filename=<% $filename |u %>">song<% ($info{songs} == 1 ? '' : 's') %></a> (<% $info{ttime} %>)</li>
+%	if ($playlist_filename eq $filename) {
+%		my $results = $parser->result;
+    <ol>
+%		for my $mp3 (@{$results->[0]->{data}}) {
+      <li><a href="/mp3/<% $mp3->[0] %>"><% $mp3->[1] %></a></li>
+%		}
+    </ol>
+    <br>
+%	}
+% }
+% closedir(DH);
+</ul>

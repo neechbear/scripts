@@ -1,0 +1,305 @@
+#!/usr/bin/perl -w
+
+############################################################
+# $Id: gc,v 1.5 2005/10/27 14:51:02 nicolaw Exp $
+# gc - Perl Code Grepper (grep_code)
+# Copyright: (c)2005 Nicola Worthington. All rights reserved.
+############################################################
+# This file is part of gc (grep_code) 
+#
+# gc is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# gc is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with gc; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+############################################################
+
+############################################################
+# gc
+# Written by Nicola Worthington <nicolaw@cpan.org>
+# Based on grep_code.pl by Nicola Worthington
+# Modified on 2005-10-24
+
+use strict;
+use vars qw($VERSION);
+$VERSION = sprintf('%d.%02d', q$Revision: 1.5 $ =~ /(\d+)/g);
+our $AUTHOR = 'Nicola Worthington <nicolaw@cpan.org>';
+(our $SELF = $0) =~ s/^.*\///g;
+
+# Version thingie
+defined $ARGV[0] && $ARGV[0] eq '-v' && print("$SELF version $VERSION by $AUTHOR\n") && exit 0;
+
+# Define ANSI colours
+my %c = qw(black 30 red 31 green 32 yellow 33 blue 34 magenta 35 cyan 36 white 37);
+our %COLOUR = map { ("$_"  => "\x1b[0m\x1b[$c{$_}m",
+					"br$_" => "\x1b[0m\x1b[1m\x1b[$c{$_}m",
+					"bg$_" => "\x1b[".($c{$_}+10).'m'); } keys %c;
+@COLOUR{qw(normal bright)} = ("\x1b[0m","\x1b[1m");
+undef %c;
+
+# Read .rc file
+our $CFG = read_config("$ENV{HOME}/.gcrc");
+
+# Slurp and pre-process the data
+my $data = my $rawdata = get_data();
+
+# Highlight things
+for my $match (grep(/^highlight_\S+$/,sort keys %{$CFG})) {
+	my ($colour,$regex) = split(/\s+/,$CFG->{$match},2);
+	$data =~ s/($regex)/$COLOUR{$colour}$1$COLOUR{normal}/smg;
+}
+
+# Process comments
+if ($CFG->{comment_remove}) {
+	$data =~ s{^([ \t]*\#.*?)$}{}smg;
+} elsif (length $CFG->{comment_prefix} || $CFG->{comment_colour}) {
+	my $prefix = $COLOUR{$CFG->{comment_colour}}.$CFG->{comment_prefix};
+	#$data =~ s{(^[ \t]*\#)}{$prefix$1}smg;
+	$data =~ s{(^[ \t]*\#.*?$)}{my $m=$1;$m=~s/\x1b\[.+?m//g;$prefix.$m;}smeg;
+}
+
+# Process POD
+if ($CFG->{pod_remove}) {
+	$data =~ s{(^=[a-z]+\d?.+?^=cut)}{my $m=$1;$m=~s/[^\n]+//smg;$m}smeg;
+} elsif (length $CFG->{pod_prefix} || $CFG->{pod_colour}) {
+	my $prefix = $COLOUR{$CFG->{pod_colour}}.$CFG->{pod_prefix};
+	$data =~ s{(^=[a-z]+\d?.+?^=cut)}{
+		my $m=$1;$m=~s/\x1b\[.+?m//g;$m=~s/^/$prefix/g;$m;}smeg;
+}
+
+# Output data
+our @roll;
+our $print;
+our $line_number = 0;
+for (split(/\n/,$data)) {
+	$line_number++;
+	if (!m/\x1b\[/i && !$print) {
+		push @roll, $_;
+		shift @roll if @roll > $CFG->{context};
+	} elsif (!m/\x1b\[/i && $print) {
+		print_line($line_number,$_);
+		$print--;
+	} elsif (m/\x1b\[/i) {
+		print_line($line_number-$#roll-1,shift @roll) while @roll;
+		print_line($line_number,$_);
+		$print = $CFG->{context};
+	}
+}
+print $COLOUR{normal};
+
+# Search and output document for musthave_ requirments
+print(('-'x80)."\n") if grep(/^musthave_\S+$/,keys %{$CFG});
+for my $match (grep(/^musthave_\S+$/,keys %{$CFG})) {
+	if (my (@res) = $rawdata =~ m/$CFG->{$match}/smg) {
+		print "$COLOUR{brgreen}Positive match for '$match': @res$COLOUR{normal}\n";
+	} else {
+		print "$COLOUR{brred}Could not find match for '$match'$COLOUR{normal}\n"
+	}
+}
+
+
+############################################################
+# Subroutines
+
+sub print_line {
+	my ($line_number,$line) = @_;
+	printf("%s%7d%s %s\n",
+			($line =~ m/\x1b\[/?$COLOUR{$CFG->{linenum_colour}}.
+					$COLOUR{$CFG->{linenum_highlight}}:
+					$COLOUR{$CFG->{linenum_colour}}),
+			$line_number,
+			($line =~ m/\x1b\[/?$COLOUR{normal}:
+					$COLOUR{$CFG->{context_colour}}),
+			$line
+		);
+}
+
+sub get_data {
+	local $/ = undef;
+	if (@_ && $_[0]) {
+		return (read_file($_[0]))[0];
+	} elsif (key_ready()) {
+		my $data = <STDIN>;
+		return $data;
+	} elsif (@ARGV) {
+		return (read_file(pop(@ARGV)))[0];
+	} else {
+		die "Supply with STDIN or arguments, stupid!\n";
+	}
+}
+
+sub read_file {
+	open(FH,"<$_[0]")||die "Unable to open file handle FH for file '$_[0]': $!";
+	my @data = <FH>;
+	close(FH)||die "Unable to close file handle FH for file '$_[0]': $!";
+	return @data;
+}
+
+sub key_ready {
+	my ($rin, $nfd) = ('','');
+	vec($rin, fileno(STDIN), 1) = 1;
+	return $nfd = select($rin,undef,undef,0);
+}
+
+sub read_config {
+	my @data;
+	if (-e $_[0]) {
+		@data = read_file($_[0]);
+	} else {
+		@data = <DATA>;
+		if (open(RC,">$_[0]")) {
+			print(RC $_) for @data;
+			close(RC);
+		}
+	}
+	chomp @data;
+	my %data;
+	for (@data) {
+		next if /^\s*(\#|;)/ || /^\s*$/;
+		if (/^\s*(\S+)(?:\s+|\s*=>?\s*)("|')?(.+?)\2?\s*$/) {
+			$data{lc($1)} = $3;
+		}
+	}
+	return set_defaults(\%data);
+}
+
+sub set_defaults {
+	my $data = shift;
+	my %defaults = (qw(linenum_colour bryellow linenum_highlight bgred
+		pod_colour brcyan comment_colour blue context 3),
+		('pod_prefix','###POD### ','comment_prefix','###COMMENT### '));
+	$data->{$_} ||= $defaults{$_} for keys %defaults;
+	return $data;
+}
+
+
+############################################################
+# POD documentation
+
+=pod
+
+=head1 NAME
+
+gc - Grep Code
+
+=head1 SYNOPSYS
+
+  gc Module.pm
+  cat ~/script.pl | gc
+  for i in `find ~ -type f -name "*.pm"`;do echo $i; gc $i; echo "";done
+
+=head1 DESCRIPTION
+
+This code needs to be tidied up and documented for public release.
+
+=head1 VERSION
+
+$Id: gc,v 1.5 2005/10/27 14:51:02 nicolaw Exp $
+
+$Revision: 1.5 $
+
+=head1 AUTHOR
+
+$Author: nicolaw $
+
+Nicola Elizabeth Worthington
+
+<nicolaworthington@msn.com>
+
+<nicolaw@cpan.org>
+
+=cut
+
+
+############################################################
+# .gcrc
+
+__DATA__
+
+############################################################
+#
+#   $Revision: 1.5 $
+#   $Author: nicolaw $
+#
+#   This is a default .gcrc file. It is not a production ready
+#   version. It will however give you a pretty reasonable basic
+#   grep of perl code.
+#
+
+############################################################
+# Colours
+#                       BRIGHT              BACKGROUND
+#    black              brblack (grey)      bgblack
+#    red                brred               bgred
+#    green              brgreen             bggreen
+#    yellow (brown)     bryellow            bgyellow (brown)
+#    blue               brblue              bgblue
+#    magenta            brmagenta           bgmagenta
+#    cyan               brcyan              bgcyan
+#    white              brwhite             bgwhite
+#
+
+
+############################################################
+# General configuration
+
+context 3
+context_colour brblack
+
+linenum_colour bryellow
+linenum_highlight bgred
+
+pod_prefix "###POD### "
+pod_colour blue
+pod_remove true
+
+comment_prefix "###COMMENT### "
+comment_colour blue
+comment_remove true
+
+
+############################################################
+# Directives beginning with "musthave_" should be followed
+# by a perl regular expression
+
+musthave_version \(?\$VERSION\)?\s*=\s*.*?;
+musthave_strict ^use strict\b.*?;
+musthave_contact (?:^=head\d AUTHOR|\$Author: nicolaw $|^\s*\#[^\n]*(?i)(?:contact|author|maintainer|written\s*by).*?$)
+
+
+############################################################
+# Directives beginning with "highlight_" should be followed
+# by a colour and a perl regular expression 
+
+highlight_01modules cyan ((use\s+)?(English|Apache::File|FileHandle::(\S+)?|IO::(\S+)?|File::(\S+)?|CGI::(\S+)?|AutoLoader(\s+.+?)?;|Exporter(\s+.+?)?;))
+
+highlight_02fileio red \b(open|opendir|sysopen|opendbm|unlink|mkdir|rmdir|chmod|tie|rename)\b
+highlight_03bbckw red \b(BBC::KW(::\S+)?|(add_|set_)?ok2(read|write))\b
+
+highlight_04process red \b(exit|system|fork|exec|require|kill|sleep|use|eval|do)\b
+highlight_05backticks brred `
+
+highlight_06paths green (/home/system|/proc|/dev|/tmp|/var/tmp|/usr|\.cfg|\.conf|\.cnf|\.ini)
+highlight_07urls green (http://|https://|file://|ftp://)
+highlight_12httpmodules cyan ((use\s+)?(HTTP::[A-Za-z0-9_::]+|LWP::[A-Za-z0-9_::]+|URL::[A-Za-z0-9_::]+|URI::[A-Za-z0-9_::]+)(\s*;)?)
+
+highlight_00regex magenta (gx|/ee|\buse\s+re\b.+?$)
+highlight_09core magenta (^package\s+\S+?;|CORE::(\S+)?|UNIVERSAL::(\S+)?|main::(\S+)?|overload)
+
+highlight_10env yellow ([\$\%\@\{]?ENV\}?|[\$\%\@\{]?INC\}?|[\$\@\{]?ISA\}?|[\$\@\{]?EXPORT_OK\}?|[\$\@\{]?EXPORT\}?|[\$\%\@\{]?EXPORT_TAGS\}?|\$VERSION|\$AUTOLOAD)
+
+highlight_12debug brblue (\bwarn\b|\bSTDERR\b|\bDEBUG\b|\bVERBOSE\b|\bDEV\b|\bTEST\b|\bLIVE\b)
+
+highlight_11sql bryellow (INSERT\s+INTO|DELETE\s+FROM|DROP\s+TABLE|CREATE\s+TABLE|ALTER\s+TABLE|UPDATE\s+\S+\s+SET)
+
+
+
+

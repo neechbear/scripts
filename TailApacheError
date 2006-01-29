@@ -1,0 +1,121 @@
+#!/usr/bin/perl -w
+
+use strict;
+use DBI;
+use Getopt::Std;
+use Mail::Mailer;
+use Net::SMS::Genie;
+use File::Tail;
+use vars qw($VERSION $MOI $DPID $NPID %OPTS %LASTHR);
+
+$VERSION = 2.0;
+($MOI = $0) =~ s|^.*/||;
+getopts('n',\%OPTS);
+
+unless ($OPTS{n}) { # Parent daemon
+	if ($DPID = fork) { # Parent hasn't forked yet, so fork
+		print "Forking daemon $DPID ...\n";
+
+	} else { # We're now a parent daemon
+		die "Cannot fork: $!" unless defined $DPID;
+		my $tailfile = '/opt/apache/logs/error_log';
+		my $file=File::Tail->new(
+			name		=> $tailfile,
+			interval	=> 1,
+			maxinterval	=> 2,
+			adjustafter	=> 20,
+			errmode		=> "return",
+			tail		=> 0
+		) || die $!;
+       		while (defined($_=$file->read)) {
+			if (/^\s*\[(.+?)\]\s+\[(.+?)\]\s+\[client (.+?)\]\s+(.*\b(default\.ida|winnt|cmd\.exe|root\.exe)(\b|\?).*)\s*$/) {
+				my ($date,$type,$ip,$msg) = ($1,$2,$3,$4);
+				while (my ($k,$v) = each %LASTHR) {
+					if ($v < time-60*60) { $LASTHR{$k} = undef; }
+				}
+				unless (defined $LASTHR{$ip} && $LASTHR{$ip} > time-60*60) {
+					$LASTHR{$ip} = time;
+					#print "Starting nmap STDOUT pipe ...\n";
+					open(PH,"|$0 -n") || warn $!;
+					print PH "$date\n";
+					print PH "$type\n";
+					print PH "$ip\n";
+					print PH "$msg\n";
+					close(PH) || warn $!;
+					#print "Closed nmap pipe.\n";
+				}
+			}
+		}
+	}
+
+} else { # nmap target and write to db if not already there
+	my ($date,$type,$ip,$msg,$os);
+	#print "nmap child is running\n";
+	unless ($NPID) { # Parent nmap hasn't forked yet so get info
+		chomp($date = <>);
+		chomp($type = <>);
+		chomp($ip = <>);
+		$msg = '';
+		while (<>) { $msg .= $_; }
+	}
+
+	if ($NPID = fork) { # Parent hasn't forked yet, so fork
+		#print "Forking nmap $NPID ...\n";
+
+	} else { # We're now a parent daemon
+		#print "Connecting to DB ...\n";
+		my $dsn = 'DBI:mysql:probes:localhost';
+		my $db_user_name = 'username';
+		my $db_password = 'password';
+		my $dbh = DBI->connect($dsn, $db_user_name, $db_password);
+		die "Failed to connect to DB" unless $dbh;
+
+		my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+		my $seldate = sprintf("%d%02d%02d",$year+1900,$mon+1,$mday);
+		my $sql = qq/SELECT id FROM apache_error WHERE ip = '$ip' AND timestamp LIKE '$seldate%' LIMIT 1/;
+		my $sth = $dbh->prepare($sql);
+		$sth->execute();
+
+		unless ($sth->fetchrow_array()) {
+			#print "Starting nmap STDIN pipe ...\n";
+			open(PH,"nmap -P0 -O -oG - $ip|") || warn $!;
+			my $nmap = '';
+			while (<PH>) { $nmap .= $_; }
+			close(PH) || warn $1;
+			#print "Closing nmap pipe.\n";
+			if ($nmap =~ /\tOS: (.+?)\t/) { $os = $1; }
+			$msg = $dbh->quote($msg);
+			$os = $dbh->quote($os);
+			$nmap = $dbh->quote($nmap);
+			my $sql = qq/
+				INSERT INTO
+					apache_error
+				VALUES (
+					'',NOW(),'$date','$type','$ip',$msg,$nmap,$os
+				)
+			/;
+			$dbh->do($sql) or die $dbh->errstr;
+			#print "$sql\n";
+			sendmail($ip,$sql);
+		} else {
+			#print "Skipping nmap scan; already exists for $ip on $seldate.\n";
+		}
+
+        	$dbh->disconnect();
+	}
+}
+
+sub sendmail {
+	my ($ip,$sql) = @_;
+	print "Sending notification email ...\n";
+        my $m = new Mail::Mailer 'smtp', Server => 'your.smtp.server';
+        $m->open({To      => ['bar@foo.org','foo@bar.com'],
+                  From    => "root\@wibble.net ($MOI)",
+                  Subject => "[$MOI] Probe from $ip"});
+        print $m $sql;
+        $m->close;
+	#print "Done!\n";
+}
+
+
+

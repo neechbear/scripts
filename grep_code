@@ -1,0 +1,355 @@
+#!/usr/local/perl/bin/perl -w
+
+##############################################################################
+# grep_code.pl
+# Written by Nicola Worthington <nicolaw@cpan.org>
+
+use strict;
+use lib qw(/home/system/cgi-bin/lib);
+use File::Find ();
+use Pod::Strip ();
+use File::Slurp ();
+use Getopt::Std ();
+use vars qw($VERSION $SELF);
+
+$| = 1; # Autoflush output
+($SELF = $0) =~ s|^.*/||;
+$VERSION = sprintf('%d.%02d', q$Revision: 1.1 $ =~ /(\d+)/g);
+
+use vars qw(*name *dir *prune);
+*name   = *File::Find::name;
+*dir    = *File::Find::dir;
+*prune  = *File::Find::prune;
+
+##############################################################################
+# Colour constants
+
+use constant NORMAL			=> '[0m';
+use constant BRIGHT			=> '[1m';
+use constant BLACK			=> '[0m[30m';
+use constant DARK_GREY		=> '[0m[30m[1m';
+use constant RED			=> '[0m[31m';
+use constant BRIGHT_RED		=> '[0m[31m[1m';
+use constant GREEN			=> '[0m[32m';
+use constant BRIGHT_GREEN	=> '[0m[32m[1m';
+use constant YELLOW			=> '[0m[33m';
+use constant BRIGHT_YELLOW	=> '[0m[33m[1m';
+use constant BLUE			=> '[0m[34m';
+use constant BRIGHT_BLUE	=> '[0m[34m[1m';
+use constant MAGENTA		=> '[0m[35m';
+use constant BRIGHT_MAGENTA	=> '[0m[35m[1m';
+use constant CYAN			=> '[0m[36m';
+use constant BRIGHT_CYAN	=> '[0m[36m[1m';
+use constant GREY			=> '[0m[37m';
+use constant WHITE			=> '[0m[37m[1m';
+use constant BLACK_BG		=> '[40m';
+use constant RED_BG			=> '[41m';
+use constant GREEN_BG		=> '[42m';
+use constant YELLOW_BG		=> '[43m';
+use constant BLUE_BG		=> '[44m';
+use constant MAGENTA_BG		=> '[45m';
+use constant CYAN_BG		=> '[46m';
+use constant GREY_BG		=> '[47m';
+
+##############################################################################
+# Configuration
+
+my %regex = (
+		sql         => [ ( qr(INSERT\s+INTO), qr(DELETE\s+FROM), qr(DROP\s+TABLE),
+						qr(CREATE\s+TABLE), qr(ALTER\s+TABLE), qr(UPDATE\s+\S+\s+SET) ) ],
+		modules     => [ ( qr(use\s+English), 'Apache::File', qr(FileHandle::(\S+)?),
+						qr(IO::(\S+)?), qr(File::(\S+)?) ) ],
+		fileio      => [ ( 'open', 'opendir', 'sysopen', 'opendbm', 'unlink', 'mkdir',
+						'rmdir', 'chmod', 'tie', 'rename' ) ],
+		process     => [ ( 'exit', 'system', 'fork', 'exec', 'require', 'kill', 'sleep',
+						'use', 'eval', 'do' ) ],
+		regex       => [ ( 'qx', '/ee') ],
+		paths       => [ ( '/home/system', '/proc', '/dev', '/tmp', '/var/tmp', '/usr', '.cfg', '.conf', '.cnf', '.ini' ) ],
+		url			=> [ ( 'http://', 'https://', 'file://', 'ftp://' ) ],
+		core        => [ ( qr(CORE::(\S+)?), 'overload' ) ],
+		environment => [ ( qr([\$\%\@\{]?ENV\}?), qr([\$\%\@\{]?INC\}?)) ],
+		'good_things' => [ ( qr(\$VERSION), '$VERSION', 'VERSION', qr(IFL::FileIO(::\S+)?) ) ],
+		'BBC::KW'   => [ ( qr(BBC::KW(::\S+)?), 'ok2read', 'ok2write', 'add_ok2read',
+						'add_ok2write', 'set_ok2read', 'set_ok2write' ) ],
+	);
+
+my %colours = (
+		sql         => YELLOW,
+		modules     => BRIGHT_GREEN,
+		fileio      => BRIGHT_RED,
+		process     => RED,
+		regex       => MAGENTA,
+		paths       => GREEN,
+		url         => GREEN,
+		core        => BRIGHT_RED,
+		environment => BRIGHT_BLUE,
+		'BBC::KW'   => BRIGHT_CYAN,
+		'good_things' => BRIGHT_YELLOW.BLUE_BG,
+		okay        => NORMAL,
+	);
+
+##############################################################################
+# Main code
+
+my $opts = { cwd => `pwd` }; chomp $opts->{cwd};
+Getopt::Std::getopts('vhpmscGg:', $opts);
+
+display_version() if exists $opts->{v};
+display_help() if exists $opts->{h};
+display_available_groups() if exists $opts->{G};
+
+my @groups_to_test = defined $opts->{g} && exists $regex{(split(/,/,$opts->{g}))[0]} ?
+											split(/,/,$opts->{g}) : sort keys %regex;
+my @files_to_process = ();
+File::Find::find({wanted => \&wanted}, '.');
+
+my %alerts;
+for my $file (@files_to_process) {
+	die "Unable to read $file" unless -f $file && -r $file;
+	printf("%s%s\n", WHITE, ('-'x79)) if keys %alerts;
+
+	my $metadata = undef;
+	my $line_no = 0;
+	my $code;
+	my @lines;
+
+	if (exists $opts->{p}) {
+		my $p = Pod::Strip->new;
+		$p->output_string(\$code);
+		$p->parse_file($file);
+		@lines = split(/\n/,$code);
+	} else {
+		@lines = File::Slurp::read_file($file);
+	}
+
+	for (@lines) {
+		chomp;
+		$line_no++;
+		$metadata = check_for_metadata($_,$metadata) if exists $opts->{m};
+		next if /^\s*\#/ && exists $opts->{c};
+		$alerts{$file} += check_line($file,$line_no,$_);
+	}
+
+	printf("%sThere were %s alerts found in %s%s\n", WHITE, $alerts{$file}, $file, NORMAL);
+
+	if (exists $opts->{m}) {
+		my $cmd = "/usr/local/perl/bin/perl -I/home/system/cgi-bin/lib -I$opts->{cwd} -I$opts->{cwd}/lib -MPackageSet -c $file > /dev/null 2>&1";
+		print "$cmd\n";
+		if (!system($cmd)) {
+			$metadata->{Code}->{Compiles} = green('Y');
+		}
+
+		print "\n";
+		my @groups = sort keys %{$metadata};
+		print WHITE;
+		for my $group (@groups) {
+			printf('%-26s ', $group);
+		} print NORMAL."\n";
+
+		my ($done_groups,$row) = (0,0);
+		while ($done_groups < @groups) {
+			for my $group (@groups) {
+				my @data = map { $_ } sort keys %{$metadata->{$group}};
+				if (@data > $row) {
+					#printf('%-22s ', "$data[$row]: ".$metadata->{$group}->{$data[$row]});
+					printf('[%s] %-22s ', $metadata->{$group}->{$data[$row]}, $data[$row]);
+				} else {
+					printf('%-26s ', '');
+					$done_groups++;
+				}
+			} print "\n";
+			$row++;
+		}
+	}
+}
+
+
+
+##############################################################################
+# Subroutines
+
+sub check_for_metadata {
+	local $_ = shift;
+	my $metadata = shift;
+
+	unless (defined $metadata) {
+		$metadata = {
+				POD => {
+					NAME		=> exists $opts->{p} ? '' : red('N'),
+					SYNOPSIS	=> exists $opts->{p} ? '' : red('N'),
+					DESCRIPTION	=> exists $opts->{p} ? '' : red('N'),
+					VERSION		=> exists $opts->{p} ? '' : red('N'),
+					AUTHOR		=> exists $opts->{p} ? '' : red('N'),
+				},
+				Versioning => {
+					'$Id: grep_code,v 1.1 2005/10/24 15:13:57 nicolaw Exp $'		=> red('N'),
+					'$Revision: 1.1 $'=> red('N'),
+					'$Author: nicolaw $'	=> red('N'),
+					'$VERSION'	=> red('N'),
+				},
+				Code => {
+					'Compiles'		=> red('N'),
+					'use strict;'	=> red('N'),
+					'Inline HTML'	=> green('N'),
+				}
+			};
+	};
+
+	# Versioning
+	if (/\(?\$VERSION\)?\s*=\s*/ || /^=head\d VERSION\s*$/) {
+		$metadata->{Versioning}->{'$VERSION'} = green('Y');
+	}
+	if (/\$Id: grep_code,v 1.1 2005/10/24 15:13:57 nicolaw Exp $/) {
+		$metadata->{Versioning}->{'$Id: grep_code,v 1.1 2005/10/24 15:13:57 nicolaw Exp $'} = green($1);
+	}
+	if (/\$Revision: 1.1 $/) {
+		$metadata->{Versioning}->{'$Revision: 1.1 $'} = green($1);
+	}
+	if (/\$Author: nicolaw $/) {
+		$metadata->{Versioning}->{'$Author: nicolaw $'} = green($1);
+	}
+
+	# POD
+	if (/^=head\d\s+NAME\s*$/) {
+		$metadata->{POD}->{NAME} = green('Y');
+	}
+	if (/^=head\d\s+SYNOPSIS\s*$/) {
+		$metadata->{POD}->{SYNOPSIS} = green('Y');
+	}
+	if (/^=head\d\s+DESCRIPTION\s*$/) {
+		$metadata->{POD}->{DESCRIPTION} = green('Y');
+	}
+	if (/^=head\d\s+VERSION\s*$/) {
+		$metadata->{POD}->{VERSION} = green('Y');
+	}
+	if (/^=head\d\s+AUTHOR\s*$/) {
+		$metadata->{POD}->{AUTHOR} = green('Y');
+	}
+
+	# Code
+	if (/^use\s+strict\s*;\s*$/) {
+		$metadata->{Code}->{'use strict;'} = green('Y');
+	}
+	if (/<(HTML|BODY|TITLE|HEAD|H[1-6]|FONT|STRONG|TABLE|SPAN|DIV|HR)(\s+[^>]+)?>/i) {
+		$metadata->{Code}->{'Inline HTML'} = red('Y');
+	}
+
+
+	return $metadata;
+}
+
+sub green {
+	return BRIGHT_GREEN."@_".NORMAL;
+}
+
+sub red {
+	return BRIGHT_RED."@_".NORMAL;
+}
+
+sub check_line {
+	my $file = shift;
+	my $line_no = shift;
+	local $_ = shift;
+	return 0 if /^\s*$/;
+
+	my $alerts = 0;
+	my $coloured_line = $_;
+
+	for my $group (@groups_to_test) {
+		my @patterns = @{$regex{$group}};
+		for my $pattern (@patterns) {
+			if (/(\b|_|\(|\))$pattern(\b|_|\(|\))/) {
+				$alerts++;
+				$coloured_line =~ s/($pattern)/$colours{$group}$1$colours{okay}/g;
+			}
+		}
+	}
+
+	printf("%s%s%s:%s%d%s:%s%s\n",
+				GREY, $file, 
+				DARK_GREY, WHITE, $line_no,
+				DARK_GREY, GREY, $coloured_line
+			) if $alerts && !exists $opts->{s};
+
+	return $alerts;
+}
+
+sub wanted {
+	my ($dev,$ino,$mode,$nlink,$uid,$gid);
+	(($dev,$ino,$mode,$nlink,$uid,$gid) = lstat($_)) &&
+		-f _ &&
+		/^.*\.(p[lm]|cgi)\z/s &&
+		push(@files_to_process,$name);
+}
+
+sub display_version {
+	print "$SELF $VERSION\n";
+	print '$Id: grep_code,v 1.1 2005/10/24 15:13:57 nicolaw Exp $'."\n";
+	print "Written by Nicola Worthington.\n";
+	exit;
+}
+
+sub display_help {
+	print <<__HELP__;
+Syntax: $SELF [-v|-h|-G] [-p] [-c] [-s] [-m] [-g group]
+   -v            Display version
+   -h            Display this help
+   -m            Check for metadata
+   -g <group>    Check a specific group
+   -G            List available groups
+   -s            Sparse output
+   -c            Ignore # comments (not 100% safe)
+   -p            Strip POD comments before parsing
+__HELP__
+	exit;
+}
+
+sub display_available_groups {
+	print "Available groups:\n";
+	for my $group (sort keys %regex) {
+		printf("  %s%-17s%s%s\n",
+				$colours{$group}, $group,
+				NORMAL, join(', ', @{$regex{$group}})
+			);
+	}
+	exit;
+}
+
+=pod
+
+=NAME
+
+grep_code - Syntax highlight potential security failings in Perl code
+
+=SYNOPSIS
+
+    Syntax: grep_code [-v|-h|-G] [-p] [-c] [-s] [-m] [-g group]
+       -v            Display version
+       -h            Display this help
+       -m            Check for metadata
+       -g <group>    Check a specific group
+       -G            List available groups
+       -s            Sparse output
+       -c            Ignore # comments (not 100% safe)
+       -p            Strip POD comments before parsing
+
+=DESCRIPTION
+
+Will recursively look for .pl and .pm files in the current directory,
+and output colour coded output of potential security failing in the
+code, and optionall summarise details of missing requirements in the code.
+
+=AUTHOR
+
+Nicola Worthington
+
+=VERSION
+
+$Id: grep_code,v 1.1 2005/10/24 15:13:57 nicolaw Exp $
+
+=cut
+
+__END__
+
+
+
