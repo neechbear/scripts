@@ -1,0 +1,34 @@
+#!/bin/bash
+
+REPOS="$1"
+REV="$2"
+
+PATH="/home/nicolaw/bin:$PATH"
+TEMPFILE=`mktemp /tmp/postcommit.XXXXXX`
+
+AUTHOR=`svnlook author "$REPOS" -r $REV`
+if [ -z "$AUTHOR" ]; then
+    AUTHOR="<Unknown>"
+fi
+
+#svnlook log "$REPOS" >$TEMPFILE
+echo "Log:" >$TEMPFILE
+echo "===================================================================" >>$TEMPFILE
+svnlook info "$REPOS" -r $REV >>$TEMPFILE
+echo "" >>$TEMPFILE
+
+echo "Changed filed:" >>$TEMPFILE
+echo "===================================================================" >>$TEMPFILE
+svnlook changed "$REPOS" -r $REV >>$TEMPFILE
+echo "" >>$TEMPFILE
+echo "" >>$TEMPFILE
+
+svnlook diff "$REPOS" -r $REV >>$TEMPFILE
+echo "" >>$TEMPFILE
+
+cat $TEMPFILE | mail -s \
+	"[svn commit] $AUTHOR committed revision $REV to repository $REPOS" \
+	nicolaw@cpan.org
+
+rm -f $TEMPFILE
+
