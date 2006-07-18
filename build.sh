@@ -263,20 +263,21 @@ fi
 
 
 # libapreq2
+$PERL_INST_DIR/bin/cpan ExtUtils::XSBuilder::ParseSource
 cd $SRC
 URL=http://search.cpan.org`wget -q -O - http://search.cpan.org/~joesuf/libapreq2/ | grep Download | egrep -o "/CPAN/authors/.*.tar.gz"`
-TARBALL=`echo URL | sed 's/.*\///g'`
+TARBALL=`echo $URL | sed 's/.*\///g'`
+if ! [ -f $TARBALL ]; then
+	wget $URL
+	if ! [ -f $TARBALL ]; then
+		echo "Failed to download $TARBALL from $URL"
+		exit
+	fi
+fi
+
 LIBAPREQ2_SRC_DIR=`find_extract_dir $TARBALL`
 
 if ! [ -d $LIBAPREQ2_SRC_DIR ]; then
-	if ! [ -f $TARBALL ]; then
-		wget $URL
-		if ! [ -f $TARBALL ]; then
-			echo "Failed to download $TARBALL from $URL"
-			exit
-		fi
-	fi
-
 	if ! tar -zxf $TARBALL ;then
 		echo "Failed to extract $TARALL"
 		exit
