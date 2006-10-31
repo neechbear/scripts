@@ -1,0 +1,23 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+local $_ = $ARGV[0];
+if (my ($module) = $_ =~ /([a-z0-9:]+)/i) {
+        eval {
+                eval "use $module;";
+                die $@ if $@;
+        };
+        if ($@) {
+                print "$module is unavailable.\n";
+                warn $@;
+        } else {
+                my $version = eval '$' . $module . '::VERSION';
+                if (defined $version && $version) {
+                        print "$module $version\n";
+                } else {
+                        print "$module unknown version\n";
+                }
+        }
+}
+
