@@ -1,0 +1,177 @@
+#!/usr/bin/perl
+#*****************************************************************************
+#
+# Copyright (c) 2004 Guillaume Cottenceau
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2, as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+#******************************************************************************
+
+use Fcntl ':mode';
+
+#- extract arguments
+@ARGV = map { /^-?-(\S+)$/ ? do { $options{$1} = 1; () } : $_ } @ARGV;
+
+if (@ARGV != 1) {
+    die
+"Usage: " . basename($0) . " [OPTION]... DIRECTORY
+Recursively sort files in the specified directory, more recent last.
+
+Options:
+  -noF        do not emulate `ls -F'
+  -nocolor    do not emulate `ls --color'
+  -l          slightly longer listing format
+";
+}
+
+sub mtime {
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks) = lstat $_[0];
+    $mtime;
+}
+
+my %colors;
+#- collect all LS_COLORS mappings
+foreach (split /:/, $ENV{LS_COLORS}) {
+    /(.*)=(.*)/ and $colors{$1} = $2;
+}
+my %extensions;
+#- put file extensions mappings in a special hash
+foreach (keys %colors) {
+    /^*(\..*)/ or next;
+    $extensions{$1} = $colors{$_};
+}
+
+my (%users, %groups);
+if ($options{l}) {
+    foreach (cat_('/etc/passwd')) {
+        my @fields = split /:/;
+        $users{$fields[2]} = $fields[0];
+    }
+    foreach (cat_('/etc/group')) {
+        my @fields = split /:/;
+        $groups{$fields[2]} = $fields[0];
+    }
+}
+
+sub col {
+    my ($f, $orig_dir) = @_;
+    my $retstring;
+    if (!$options{nocolor}) {
+        my $col;
+        #- need chdir for link targets
+        $orig_dir && $f =~ /^\.\./ and chdir $orig_dir;
+        if (!-e $f) {
+            #- first set (or)phan color (symlink to nonexistant file)
+            $col = $colors{or};
+        } else {
+            foreach (keys %extensions) {
+                if ($f =~ /\Q$_\E$/) {
+                    #- set color on file extension match
+                    $col = $extensions{$_} ;
+                    goto col_done;
+                }
+            }
+        }
+        #- set color on file type
+        $col ||= -d $f ? $colors{di}
+               : -l $f ? $colors{ln}
+               : -S $f ? $colors{so}
+               : -p $f ? $colors{pi}
+               : -b $f ? $colors{bd}
+               : -c $f ? $colors{cd}
+               : -u $f ? $colors{su}
+               : -g $f ? $colors{sg}
+               : -k $f ? $colors{wt}
+               : -x $f ? $colors{ex}
+               : '';
+      col_done:
+        $retstring = "\033[${col}m$f\033[0;39m";
+    } else {
+        $retstring = $f;
+    }
+    my $a;
+    if (!$options{noF}) {
+        #- appends a character for file type (like ls -F)
+        $a = -d $f ? '/'
+           : -S $f ? '='
+           : -p $f ? '|'
+           : -x $f ? '*'
+           : '';
+        $f =~ /\Q$a\E$/ and $a = '';
+    }
+    $orig_dir and chdir $ENV{PWD};
+    return $retstring . "$a";
+}
+
+#- generates the mode string just like `ls -l'
+sub filemode {
+    my ($mode) = @_;
+    return ( S_ISREG($mode)  ? '-' :
+             S_ISDIR($mode)  ? 'd' :
+             S_ISLNK($mode)  ? 'l' :
+             S_ISBLK($mode)  ? 'b' :
+             S_ISCHR($mode)  ? 'c' :
+             S_ISFIFO($mode) ? 'p' :
+             S_ISSOCK($mode) ? 's' : '?' ) .
+
+           ( ($mode & S_IRUSR) ? 'r' : '-' ) .
+           ( ($mode & S_IWUSR) ? 'w' : '-' ) .
+           ( ($mode & S_ISUID) ? (($mode & S_IXUSR) ? 's' : 'S')
+                               : (($mode & S_IXUSR) ? 'x' : '-') ) .
+
+           ( ($mode & S_IRGRP) ? 'r' : '-' ) .
+           ( ($mode & S_IWGRP) ? 'w' : '-' ) .
+           ( ($mode & S_ISGID) ? (($mode & S_IXGRP) ? 's' : 'S')
+                               : (($mode & S_IXGRP) ? 'x' : '-') ) .
+
+           ( ($mode & S_IROTH) ? 'r' : '-' ) .
+           ( ($mode & S_IWOTH) ? 'w' : '-' ) .
+           ( ($mode & S_ISVTX) ? (($mode & S_IXOTH) ? 't' : 'T')
+                               : (($mode & S_IXOTH) ? 'x' : '-') );
+
+}
+
+#- generates additional information on file, an excerpt of `ls -l'
+sub infos {
+    my ($f) = @_;
+    if ($options{l}) {
+        my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks) = stat $f;
+        #- display mode first, then user/group, then size
+        return filemode($mode) .
+          sprintf(" %-8s %-8s", $users{$uid}, $groups{$gid}) .
+          sprintf(" %8s ", (-b $f || -c $f ? join(", ", divide($rdev, 256))
+                                           : $size));
+    }
+}
+
+#- sort the results of find according to mtime to get more recent last using
+#- schwartzian transform
+foreach (sort { $a->[1] <=> $b->[1] }
+           map { [ $_, mtime($_) ] } chomp_(`find $ARGV[0]`)) {
+    my $f = $_->[0];
+    print scalar(localtime($_->[1])), " ", infos($f), col($f);
+    if (-l $f) {
+        print " -> ", col(readlink($f), dirname($f)), "\n";
+    } else {
+        print "\n";
+    }
+}
+
+
+#- functions from perl-MDK-Common
+sub chomp_ { my @l = map { my $l = $_; chomp $l; $l } @_; wantarray() ? @l : $l[0] }
+sub dirname { local $_ = shift; s|[^/]*/*\s*$||; s|(.)/*$|$1|; $_ || '.' }
+sub basename { local $_ = shift; s|/*\s*$||; s|.*/||; $_ }
+sub divide { my $d = int $_[0] / $_[1]; wantarray() ? ($d, $_[0] % $_[1]) : $d }
+sub cat_ { local *F; open F, $_[0] or return; my @l = <F>; wantarray() ? @l : join '', @l }
