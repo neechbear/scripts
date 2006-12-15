@@ -7,12 +7,14 @@ use Storable qw();
 use Getopt::Std qw();
 use Data::Dumper qw();
 use Fcntl qw();
+use Devel::Size qw();
 
 BEGIN {
 	use Cwd qw();
 	use constant CWD => Cwd::cwd();
 	use constant ARGV0 => $0;
 	use constant ARGVN => @ARGV;
+	use constant MAX_BYTES => 1024 * 1024; # 1MB
 }
 
 my $state_fh;
@@ -28,10 +30,20 @@ INPUT: {
 	print "Give me some state information please: ";
 	local $_ = <>; chomp;
 	push @{$state->{input}}, $_ if /\S/;
+
+	my $stuff = [];
+	do {
+		print '.';
+		push @{$stuff}, 'X' x 102400;
+		sleep 1;
+	} while Devel::Size::total_size($stuff) <= MAX_BYTES;
+
+	print "\nWe're using too much memory; respawning ...\n";
 	eval { self_exec($state); };
 	die "Bugger! $@" if $@; # Do something better
 }
 
+	print Devel::Size::total_size($state)."\n";
 exit;
 
 sub self_exec {
