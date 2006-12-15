@@ -28,7 +28,8 @@ INPUT: {
 	print "Give me some state information please: ";
 	local $_ = <>; chomp;
 	push @{$state->{input}}, $_ if /\S/;
-	self_exec($state);
+	eval { self_exec($state); };
+	die "Bugger! $@" if $@; # Do something better
 }
 
 exit;
@@ -38,7 +39,9 @@ sub self_exec {
 	my $fileno = save_state($state);
 	my @ARGV = ARGVN;
 	shift(@ARGV),shift(@ARGV) if @ARGV >= 2 && $ARGV[0] eq '-F';
-	chdir(CWD) && exec(ARGV0,'-F',$fileno,@ARGV);
+	chdir(CWD) || die sprintf("Unable to chdir to '%s': %s",CWD,$!);
+	exec(ARGV0,'-F',$fileno,@ARGV) ||
+		die sprintf("Unable to exec '%s': %s",join("','",ARGV0,@ARGV),$1);
 }
 
 sub save_state {
@@ -51,7 +54,7 @@ sub save_state {
 			die "Unable to open anonymous state file handle: $!";
 	}
 	fcntl($state_fh, Fcntl::F_SETFD(), 0) ||
-		warn "Can't clear close-on-exec flag on temp fh: $!";
+		die "Can't clear close-on-exec flag on temp fh: $!";
 	Storable::store_fd($state,$state_fh);
 	return fileno($state_fh);
 }
