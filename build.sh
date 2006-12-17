@@ -96,6 +96,8 @@ if ! [ -d $PERL_INST_DIR ]; then
 
 	PERL_SRC_DIR=`find_extract_dir $TARBALL`
 	if [ -d $PERL_SRC_DIR ]; then
+		echo "rm -Rf $PERL_SRC_DIR"
+		sleep 3
 		rm -Rf $PERL_SRC_DIR
 	fi
 
@@ -143,6 +145,8 @@ if ! [ -d $APACHE_INST_DIR ]; then
 
 	APACHE_SRC_DIR=`find_extract_dir $TARBALL`
 	if [ -d $APACHE_SRC_DIR ]; then
+		echo "rm -Rf $APACHE_SRC_DIR"
+		sleep 3
 		rm -Rf $APACHE_SRC_DIR
 	fi
 
@@ -234,6 +238,8 @@ if ! [ -f $APACHE_INST_DIR/modules/mod_perl.so ]; then
 
 	MODPERL_SRC_DIR=`find_extract_dir $TARBALL`
 	if [ -d $MODPERL_SRC_DIR ]; then
+		echo "rm -Rf $MODPERL_SRC_DIR"
+		sleep 3
 		rm -Rf $MODPERL_SRC_DIR
 	fi
 
