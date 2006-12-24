@@ -22,17 +22,23 @@
 # vim:ts=4:sw=4:tw=78
 
 #
+# You will need zlib devel, openssl devel and libexpat devel
+# libraries installed in order to compile Apache and libapreq
+# respectively.
+#
+
+#
 # Edit whatever values you need to here
 #
 
-WEBROOT=$HOME/webroot
+WEBROOT=$HOME
 SRC=$WEBROOT/src
 
 PERLVER=`wget -q -O - http://www.perl.org/ | grep "Current Release" | egrep -o "5\.[0-9]\.[0-9]" | head -1`
 if [ "x$PERLVER" = "x" ]; then PERLVER="5.8.8" ;fi
 
 APACHEVER=`wget -q -O - http://archive.apache.org/dist/httpd/ | egrep -o "CURRENT-IS-[0-9\.]+" | sort -n | tail -1 | sed 's/.*-//'`
-if [ "x$APACHEVER" = "x" ]; then APACHEVER="2.2.2" ;fi
+if [ "x$APACHEVER" = "x" ]; then APACHEVER="2.2.3" ;fi
 
 MODPERLVER="2.0-current"
 
@@ -256,6 +262,9 @@ if ! [ -f $APACHE_INST_DIR/modules/mod_perl.so ]; then
 	$PERL_INST_DIR/bin/perl Makefile.PL \
 		MP_APXS=$APACHE_INST_DIR/bin/apxs \
 		&& make && make install
+
+	$PERL_INST_DIR/bin/perl -pie 'print("LoadModule perl_module modules/mod_perl.so\n"),$added = 1 if /^LoadModule\s/ && !$added;' \
+		$APACHE_INST_DIR/conf/httpd.conf
 else
 	echo "mod_perl $MODPERLVER is already built; skipping ..."
 	sleep 1
@@ -295,13 +304,15 @@ if ! [ -d $LIBAPREQ2_SRC_DIR ]; then
 	fi
 
 	$PERL_INST_DIR/bin/perl Makefile.PL && make && make install
+
+	$PERL_INST_DIR/bin/perl -pie 'print("LoadModule apreq_module modules/mod_apreq2.so\n"),$added = 1 if /^LoadModule\s/ && !$added;' \
+		$APACHE_INST_DIR/conf/httpd.conf
 else
 	echo "libapreq may already be built; skipping ..."
 	sleep 1
 fi
 
 
- 
 
 echo
 echo "Complete."
