@@ -22,12 +22,14 @@ while (local $_ = <DATA>) {
 
 for my $artist (sort keys %tracks) {
 	while (my ($track,$files) = each %{$tracks{$artist}}) {
+		my $symlink = "$artist - $track.mp3";
+		next if -l $symlink && -f readlink($symlink);
 		my $file = @{$files} > 1 ? select_mp3($artist,$track,
 									$tracks{$artist}->{$track})
 					: @{$files} ? $files->[0] : '';
+
 		if ($file) {
 			print "$artist - $track => '$file'\n";
-			my $symlink = "$artist - $track.mp3";
 			unlink $symlink if -l $symlink;
 			symlink $file, $symlink;
 		} else {
@@ -125,7 +127,7 @@ Blink 182 - What's My Age Again?
 Blues Traveler - Hook
 Blues Traveler - Just Wait
 Blues Traveler - Run-Around
-Bon Jovi - Lovin' On A Prayer
+Bon Jovi - Livin' On A Prayer
 Bon Jovi - You Give Love A Bad Name
 Boys 2 Men - I Swear
 Boyzone - Picture Of You
@@ -240,6 +242,7 @@ Richard Marx - Hazard
 Robbie Williams - Angels
 Robbie Williams & Kylie Minogue - Kids
 Rob Dougan - One And The Same (Coda)
+Rod Stewart - Faith Of The Heart
 Simply Red - For Your Babies
 Simply Red - Something Got Me Started
 Simply Red - Stars
@@ -251,7 +254,6 @@ Spice Girls -
 Steps - Tragedy
 Supergrass - Pumping On Your Stereo
 Take That - Back For Good
-Texas - 0.34
 Texas - Black Eyed Boy
 Texas - Halo
 The Cardigans - Lovefool
@@ -263,7 +265,6 @@ The Feeling - Never Be Lonely
 The Feeling - Sewn
 The Jam - A Town Called Malice
 The Kooks - She Moves In Her Own Way
-The London Session Orchestra - Ball
 The Offspring - Original Prankster
 The Offspring - Pretty Fly
 The Police - De Do Do Do, De Da Da Da
