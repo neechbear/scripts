@@ -9,7 +9,7 @@ CREATE TABLE nb_item (
 	children BOOL,
 	vegetarian BOOL,
 	nuts BOOL,
-	price FLOAT(5,2)
+	price DECIMAL(5,2)
 );
 
 DROP TABLE IF EXISTS nb_style;
@@ -24,7 +24,7 @@ CREATE TABLE nb_option (
 	type ENUM('noodles','soup','rice') NOT NULL,
 	variant VARCHAR(12) NOT NULL,
 	description VARCHAR(128) NOT NULL,
-	suppliment FLOAT(5,2),
+	suppliment DECIMAL(5,2),
 	PRIMARY KEY (type,variant)
 );
 
