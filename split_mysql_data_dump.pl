@@ -18,6 +18,9 @@ while (local $_ = <FH>) {
 		pop @header;
 		if (/^--\s*Dumping data for table \`(\S+)?\`/) { $table = $1; }
 		$out = open_sql_file("$file.$table.sql",$out);
+		print $out join('',@header);
+		print $out $lastline;
+		print $out $_;
 
 	} elsif (!$table) {
 		push @header, $_;
