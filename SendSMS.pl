@@ -102,10 +102,10 @@ my $rtn = SendSMS($soapCfg,{
 		'Client_Ref'   => 'Client_Ref',    # (str) Send a Client reference of your choice that you will use with SMSstatus to get delivery reports
 		'Billing_Ref'  => 'Billing_Ref',   # (str) Send a billing reference of your choice for future reference.
 		'Connection'   => 2,               # (int) 1- Simulator(No SMS is sent). 2-Enterprise SMS. 3-Premium SMS
-		'Originator'   => 'Piglet',        # (str) Formated number with a + e.g. +4478945612 or 11 charaters
+		'Originator'   => 'SendSMS.pl',    # (str) Formated number with a + e.g. +4478945612 or 11 charaters
 		'OType'        => 1,               # (int) 0- the originator mus be a phone number. 1-the orginator can be 11 characters e.g "hello"
-		'Destination'  => '+447738930000', # (str) Formated number with a + e.g. +4478945612
-		'Body'         => 'message',       # (str) Text of you message
+		'Destination'  => shift(@ARGV),    # (str) Formated number with a + e.g. +4478945612
+		'Body'         => "@ARGV",         # (str) Text of you message
 		'SMS_Type'     => 0,               # (int) 0- Normal SMS 1-Auto Open SMS, the message is displayed directly on the screen
 		'SMS_encoding' => 0,               # (int) not in use at the moment. Must be set to 0
 	});
