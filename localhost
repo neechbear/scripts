@@ -1,0 +1,78 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Socket;
+use POSIX qw(uname);
+
+use constant SEARCH => {
+			DEFAULT         => [qw(tfb.net ntl.tfb.net eclipse.tfb.net dev.spamlab.co.uk)],
+			'eowyn.tfb.net' => [qw(tfb.net)],
+			'arwen.tfb.net' => [qw(ntl.tfb.net eclipse.tfb.net tfb.net)],
+			'aragorn.dev.spamlab.co.uk' => [qw(dev.spamlab.co.uk ntl.tfb.net eclipse.tfb.net tfb.net)],
+		};
+
+(my $host = $0) =~ s/.*\///;
+my ($ip) = resolve($host);
+
+my @search = defined SEARCH->{(uname)[1]}
+					? @{SEARCH->{(uname)[1]}}
+					: @{SEARCH->{DEFAULT}};
+
+for my $path (@search) {
+	last if $ip;
+	($ip) = resolve("${host}${path}") unless $ip;
+	if ($ip) {
+		$host = "${host}${path}";
+		last if $ip;
+	}
+}
+
+die "Cannot resolve $host to an IP address.\n" unless defined $ip;
+print STDERR "$host => $ip\n";
+
+#if ($ip[0] =~ /^(192\.168\.|212\.58\.|132\.185\.|10\.)/ &&
+#	$host !~ /lilacup|arwen|localhost|pc\d+|laptop|fs0\.is|\.is\b/i) {
+#	#system("scp -i $ENV{HOME}/.ssh/id_rsa_nophrase $ENV{HOME}/.ssh/authorized* nicolaw\@$host:$ENV{HOME}/.ssh/");
+#	system("$ENV{HOME}/bin/skelit $host");
+#} else {
+#	print STDERR "Not running 'skelit' for this machine.\n";
+#}
+#
+#exec "ssh -i $ENV{HOME}/.ssh/identity_nophrase -i $ENV{HOME}/.ssh/id_rsa_nophrase -l nicolaw $host";
+
+my $cmd = "ssh $ip";
+print "$cmd\n";
+exec $cmd;
+
+exit;
+
+sub resolve {
+	return ip2host(@_) if $_[0] =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+	return host2ip(@_);
+}
+
+sub host2ip {
+	my $host = shift;
+	my @addresses = gethostbyname($host);
+	if (@addresses > 0) {
+		@addresses = map { inet_ntoa($_) } @addresses[4 .. $#addresses];
+		return @addresses;
+	} else {
+		return undef;
+	}
+}
+
+sub ip2host {
+	my $ip = shift;
+	my @numbers = split(/\./, $ip);
+	my $ip_number = pack("C4", @numbers);
+	my ($host) = (gethostbyaddr($ip_number, 2))[0];
+	if (defined $host && $host) {
+		return $host;
+	} else {
+		return undef;
+	}
+}
+
+__END__
+
