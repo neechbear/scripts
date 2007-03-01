@@ -31,6 +31,7 @@ use Data::Dumper qw(Dumper);
 use Date::Parse qw(str2time);
 use Net::Whois::IP qw(whoisip_query);
 use Memoize qw(memoize);
+use POSIX qw(strftime);
 use Storable qw(store);
 use File::Basename qw(basename);
 use Socket;
@@ -40,9 +41,7 @@ $VERSION = '0.01' || sprintf('%d', q$Revision: 956 $ =~ /(\d+)/g);
 $DEBUG = $ENV{DEBUG} ? 1 : 0;
 
 $| = 1;
-memoize('whois');
-memoize('ip2host');
-memoize('host2ip');
+memoize($_) for qw(whois ip2host host2ip);
 
 my $dbh = DBI->connect('DBI:mysql:nicolaw:localhost','nicolaw','knickers',{RaiseError=>1});
 recreate_tables($dbh);
@@ -64,7 +63,8 @@ for my $log (@logs) {
 	while (local $_ = <FH>) {
 		next unless m,GET /lib/usage.cgi\?,;
 		my $data = process_submission($_);
-		insert_row($dbh, $data);
+		$data->{mysql_insertid} = insert_row($dbh, $data);
+		DUMP('%data', $data);
 		push @submissions, $data;
 		print '.';
 	}
@@ -82,6 +82,36 @@ exit;
 
 sub insert_row {
 	my ($dbh, $data) = @_;
+	return unless defined $data->{param}->{name}
+			&& defined $data->{param}->{version};
+
+	my $sql = q{INSERT INTO submission
+			(t,ip,host,module,version,os,arch,perl,agent,netas_id)
+			VALUES (?,?,?,?,?,?,?,?,?,?)};
+	my $sth = $dbh->prepare($sql);
+
+	(my $module = $data->{param}->{name}) =~ s/-/::/g;
+	my $netas_id = defined $data->{whois}->{origin}
+				&& $data->{whois}->{origin} =~ /^AS\d+$/i
+					? $data->{whois}->{origin}
+					: undef;
+
+	$sth->execute(
+			strftime('%F %R', localtime($data->{unixtime})),
+			$data->{ip},
+			$data->{host},
+			$module,
+			$data->{param}->{version},
+			$data->{param}->{osver},
+			$data->{param}->{archname},
+			$data->{param}->{perlver},
+			$data->{ua},
+			$netas_id,
+		);
+	my $mysql_insertid = $dbh->{mysql_insertid};
+	$sth->finish;
+
+	return $mysql_insertid;
 }
 
 sub process_submission {
@@ -105,7 +135,6 @@ sub process_submission {
 	}
 	$data{whois} = whois($data{ip});
 
-	DUMP('%data', \%data);
 	return \%data;
 }
 
@@ -208,12 +237,55 @@ CREATE TABLE submission (
 	module VARCHAR(48) NOT NULL,
 	version DECIMAL(5,2) NOT NULL,
 	os VARCHAR(8),
-	arch VARCHAR(16),
+	arch VARCHAR(32),
 	perl DECIMAL(8,6),
-	agent VARCHAR(32),
+	agent VARCHAR(255),
 	netas_id VARCHAR(8)
 );
 
 __END__
 
+SELECT Module,Version, COUNT(*) AS Installs
+	FROM submission
+	WHERE
+		(
+			agent LIKE "lwp-trivial/%"
+			OR agent LIKE "LWP::Simple/%"
+			OR agent LIKE "Build.PL $Revision%"
+		)
+		AND ip NOT LIKE "132.185.144.%"
+		AND ip NOT LIKE "85.158.42.2%"
+		AND host NOT LIKE "%.tfb.net"
+		AND module IN (
+			"Parse::DMIDecode","WWW::WebStore::TinyURL","Colloquy::Data",
+			"Colloquy::Bot::Simple","Apache2::AuthColloquy","WWW::VenusEnvy",
+			"WWW::FleXtel","Sys::Filesystem","Proc::DaemonLite","WWW::Dilbert",
+			"psmon","Tie::TinyURL","Util::SelfDestruct","RRD::Simple",
+			"WWW::Comic","Parse::Colloquy::Bot","Bundle::Colloquy::BotBot2",
+			"Apache2::AutoIndex::XSLT"
+		)
+	GROUP BY module,version;
+
+wget -O - -q http://backpan.perl.org/authors/id/N/NI/NICOLAW/ | perl -ne 'if (($m) = /href="(\S+?)-\d+\.\d+.tar.gz"/) { $m =~ s/-/::/g; $m{$m}++; } END { print q{"}.join(qw{","},keys %m).qq{"\n}; }'
+
+"Parse::DMIDecode","WWW::WebStore::TinyURL","Colloquy::Data","Colloquy::Bot::Simple","Apache2::AuthColloquy","WWW::VenusEnvy","WWW::FleXtel","Sys::Filesystem","Proc::DaemonLite","WWW::Dilbert","psmon","Tie::TinyURL","Util::SelfDestruct","RRD::Simple","WWW::Comic","Parse::Colloquy::Bot","Bundle::Colloquy::BotBot2","Apache2::AutoIndex::XSLT"
+
+Apache2::AuthColloquy
+Apache2::AutoIndex::XSLT
+Bundle::Colloquy::BotBot2
+Colloquy::Bot::Simple
+Colloquy::Data
+Parse::Colloquy::Bot
+Parse::DMIDecode
+Proc::DaemonLite
+psmon
+RRD::Simple
+Sys::Filesystem
+Tie::TinyURL
+Util::SelfDestruct
+WWW::Comic
+WWW::Dilbert
+WWW::FleXtel
+WWW::VenusEnvy
+WWW::WebStore::TinyURL
 
