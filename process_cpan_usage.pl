@@ -29,19 +29,20 @@ use PerlIO::gzip qw();
 use Regexp::Log::Common qw();
 use Data::Dumper qw(Dumper);
 use Date::Parse qw(str2time);
-use Net::Whois::IP qw(whoisip_query);
+#use Net::Whois::IP qw(whoisip_query);
 use Memoize qw(memoize);
 use POSIX qw(strftime);
 use Storable qw(store);
 use File::Basename qw(basename);
 use Socket;
+use IO::Socket;
 
 use vars qw($VERSION $DEBUG);
 $VERSION = '0.01' || sprintf('%d', q$Revision$ =~ /(\d+)/g);
 $DEBUG = $ENV{DEBUG} ? 1 : 0;
 
 $| = 1;
-memoize($_) for qw(whois ip2host host2ip);
+memoize($_) for qw(ip2host host2ip best_route);
 
 my $dbh = DBI->connect('DBI:mysql:nicolaw:localhost','nicolaw','knickers',{RaiseError=>1});
 recreate_tables($dbh);
@@ -80,22 +81,84 @@ print Dumper(\@submissions);
 
 exit;
 
+
+sub best_route {
+	my $qty = shift;
+
+	my $route = (sort {
+			(split(/\//,$b->{route}))[1]
+				<=>
+			(split(/\//,$a->{route}))[1]
+		} @{routes($qty)})[0];
+
+	return $route;
+}
+
+
+sub routes {
+	my $qry = shift;
+
+	my @data;
+	my %block;
+	for (split(/[\r\n]/,whois($qry))) {
+		next if /^\s*[;#%]/;
+		if (/^\s*(\S+?):\s+(.+?)\s*$/) {
+			$block{$1} = $2;
+		} elsif (keys %block && /^\s*$/) {
+			push @data, {%block};
+			%block = ();
+		}
+	}
+	push @data, {%block} if keys %block;
+
+	return \@data;
+}
+
+
+sub whois {
+	my $qry = shift || '';
+	$qry = inet_ntoa(inet_aton($qry))
+		unless $qry =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+	return unless $qry;
+
+	my $host = 'riswhois.ripe.net';
+	my $data;
+
+	eval {
+		local $SIG{ALRM} = sub { die 'Timed Out'; };
+		alarm 3;
+		my $sock = IO::Socket::INET->new(
+				PeerAddr => inet_ntoa(inet_aton($host)),
+				PeerPort => 'whois',
+				Proto => 'tcp',
+				## Timeout => ,
+			);
+		$sock->autoflush;
+		print $sock "$qry\015\012";
+		local $/ = undef;
+		$data = <$sock>;
+		alarm 0;
+	};
+
+	alarm 0;
+	return "Error: Timeout" if $@ && $@ =~ /Timed Out/;
+	return "Error: $@" if $@;
+
+	return $data;
+}
+
+
 sub insert_row {
 	my ($dbh, $data) = @_;
 	return unless defined $data->{param}->{name}
 			&& defined $data->{param}->{version};
 
 	my $sql = q{INSERT INTO submission
-			(t,ip,host,module,version,os,arch,perl,agent,netas_id)
-			VALUES (?,?,?,?,?,?,?,?,?,?)};
+			(t,ip,host,module,version,os,arch,perl,agent,asn,route,origin)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)};
 	my $sth = $dbh->prepare($sql);
 
 	(my $module = $data->{param}->{name}) =~ s/-/::/g;
-	my $netas_id = defined $data->{whois}->{origin}
-				&& $data->{whois}->{origin} =~ /^AS\d+$/i
-					? $data->{whois}->{origin}
-					: undef;
-
 	$sth->execute(
 			strftime('%F %R', localtime($data->{unixtime})),
 			$data->{ip},
@@ -106,13 +169,16 @@ sub insert_row {
 			$data->{param}->{archname},
 			$data->{param}->{perlver},
 			$data->{ua},
-			$netas_id,
+			$data->{whois}->{origin},
+			$data->{whois}->{route},
+			$data->{whois}->{descr},
 		);
 	my $mysql_insertid = $dbh->{mysql_insertid};
 	$sth->finish;
 
 	return $mysql_insertid;
 }
+
 
 sub process_submission {
 	local $_ = shift;
@@ -133,10 +199,11 @@ sub process_submission {
 	} else {
 		$data{ip} = host2ip($data{host});
 	}
-	$data{whois} = whois($data{ip});
+	$data{whois} = best_route($data{ip});
 
 	return \%data;
 }
+
 
 sub ip2host {
 	my $ip = shift;
@@ -150,6 +217,7 @@ sub ip2host {
 	}
 }
 
+
 sub isIP {
 	return 0 unless defined $_[0];
 	return 1 if $_[0] =~ /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.
@@ -159,10 +227,12 @@ sub isIP {
 	return 0;
 }
 
+
 sub resolve {
 	return ip2host(@_) if isIP($_[0]);
 	return host2ip(@_);
 }
+
 
 sub host2ip {
 	my $host = shift;
@@ -175,9 +245,11 @@ sub host2ip {
 	}
 }
 
-sub whois {
-	return whoisip_query(shift);
-}
+
+#sub whois {
+#	return whoisip_query(shift);
+#}
+
 
 sub recreate_tables {
 	my $dbh = shift;
@@ -186,13 +258,15 @@ sub recreate_tables {
 	}
 }
 
+
 sub get_sql_statements {
 	my @sql;
 	my $sql;
 
 	while (local $_ = <DATA>) {
 		chomp;
-		next if /^__END__/ || /^\s*$/ || /^\s*[;#]/;
+		next if /^\s*$/ || /^\s*[;#]/;
+		last if /^__END__/;
 		s/^\t+/ /g;
 		$sql .= $_;
 		if (/;\s*$/) {
@@ -205,10 +279,12 @@ sub get_sql_statements {
 	return \@sql;
 }
 
+
 sub TRACE {
 	return unless $DEBUG;
 	warn(shift());
 }
+
 
 sub DUMP {
 	return unless $DEBUG;
@@ -220,13 +296,15 @@ sub DUMP {
 	}
 }
 
+
 __DATA__
 
-DROP TABLE IF EXISTS `netas`;
-CREATE TABLE netas (
-	netas_id VARCHAR(8) NOT NULL PRIMARY KEY,
-	descr VARCHAR(32)
-);
+
+#DROP TABLE IF EXISTS `netas`;
+#CREATE TABLE netas (
+#	netas_id VARCHAR(8) NOT NULL PRIMARY KEY,
+#	descr VARCHAR(32)
+#);
 
 DROP TABLE IF EXISTS `submission`;
 CREATE TABLE submission (
@@ -240,10 +318,13 @@ CREATE TABLE submission (
 	arch VARCHAR(32),
 	perl DECIMAL(8,6),
 	agent VARCHAR(255),
-	netas_id VARCHAR(8)
+	asn VARCHAR(8),
+	route VARCHAR(18),
+	origin VARCHAR(64)
 );
 
 __END__
+
 
 SELECT Module,Version, COUNT(*) AS Installs
 	FROM submission
@@ -290,4 +371,5 @@ WWW::Dilbert
 WWW::FleXtel
 WWW::VenusEnvy
 WWW::WebStore::TinyURL
+
 
