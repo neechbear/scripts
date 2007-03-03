@@ -67,7 +67,10 @@ sub routes {
 
 
 sub whois {
-	my $qry = shift;
+	my $qry = shift || '';
+	$qry = inet_ntoa(inet_aton($qry))
+		unless $qry =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+	return unless $qry;
 
 	my $host = 'riswhois.ripe.net';
 	my $data;
@@ -76,7 +79,7 @@ sub whois {
 		local $SIG{ALRM} = sub { die 'Timed Out'; };
 		alarm 3;
 		my $sock = IO::Socket::INET->new(
-				PeerAddr => inet_ntoa( inet_aton($host) ),
+				PeerAddr => inet_ntoa(inet_aton($host)),
 				PeerPort => 'whois',
 				Proto => 'tcp',
 				## Timeout => ,
