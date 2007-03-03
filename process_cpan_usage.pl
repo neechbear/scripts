@@ -29,11 +29,12 @@ use PerlIO::gzip qw();
 use Regexp::Log::Common qw();
 use Data::Dumper qw(Dumper);
 use Date::Parse qw(str2time);
-#use Net::Whois::IP qw(whoisip_query);
+use Net::Whois::IP qw(whoisip_query);
 use Memoize qw(memoize);
 use POSIX qw(strftime);
 use Storable qw(store);
 use File::Basename qw(basename);
+use Net::Netmask qw();
 use Socket;
 use IO::Socket;
 
@@ -42,7 +43,7 @@ $VERSION = '0.01' || sprintf('%d', q$Revision$ =~ /(\d+)/g);
 $DEBUG = $ENV{DEBUG} ? 1 : 0;
 
 $| = 1;
-memoize($_) for qw(ip2host host2ip best_route);
+memoize($_) for qw(ip2host host2ip best_route whoisip);
 
 my $dbh = DBI->connect('DBI:mysql:nicolaw:localhost','nicolaw','knickers',{RaiseError=>1});
 recreate_tables($dbh);
@@ -121,6 +122,7 @@ sub whois {
 		unless $qry =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 	return unless $qry;
 
+	TRACE($qry);
 	my $host = 'riswhois.ripe.net';
 	my $data;
 
@@ -144,6 +146,7 @@ sub whois {
 	return "Error: Timeout" if $@ && $@ =~ /Timed Out/;
 	return "Error: $@" if $@;
 
+	DUMP('$data',$data);
 	return $data;
 }
 
@@ -154,8 +157,9 @@ sub insert_row {
 			&& defined $data->{param}->{version};
 
 	my $sql = q{INSERT INTO submission
-			(t,ip,host,module,version,os,arch,perl,agent,asn,route,origin)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)};
+			(t,ip,host,module,version,os,arch,perl,agent,
+			 ris_asn,ris_route,ris_origin,cidr,orgname)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)};
 	my $sth = $dbh->prepare($sql);
 
 	(my $module = $data->{param}->{name}) =~ s/-/::/g;
@@ -169,14 +173,30 @@ sub insert_row {
 			$data->{param}->{archname},
 			$data->{param}->{perlver},
 			$data->{ua},
-			$data->{whois}->{origin},
-			$data->{whois}->{route},
-			$data->{whois}->{descr},
+			$data->{ripe_ris}->{origin},
+			$data->{ripe_ris}->{route},
+			$data->{ripe_ris}->{descr},
+			first_cidr(
+					$data->{whois}->{cidr},
+					$data->{whois}->{route},
+					$data->{whois}->{netblock},
+				),
+			($data->{whois}->{orgname} || $data->{whois}->{descr}),
 		);
 	my $mysql_insertid = $dbh->{mysql_insertid};
 	$sth->finish;
 
 	return $mysql_insertid;
+}
+
+
+sub first_cidr {
+	for (@_) {
+		if (/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2})\b/) {
+			return $1;
+		}
+	}
+	return undef;
 }
 
 
@@ -199,9 +219,41 @@ sub process_submission {
 	} else {
 		$data{ip} = host2ip($data{host});
 	}
-	$data{whois} = best_route($data{ip});
+	$data{whois} = whoisip($data{ip});
+	$data{ripe_ris} = best_route($data{ip});
 
 	return \%data;
+}
+
+
+sub whoisip {
+	my $ip = shift;
+
+	TRACE($ip);
+	my %out;
+	my $in = whoisip_query($ip) || {};
+	while (my ($k,$v) = each %{$in}) {
+		$k = lc($k);
+		if ($k =~ /(\S+)/) {
+			$k = $1;
+		}
+		$k =~ s/[^a-z]//g;
+
+		$v =~ s/(^\s+|\s+$)//g;
+		if ($v =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s+\-\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+			my $block = Net::Netmask->new($1);
+			my $cidr = $block->desc || '';
+			if (length $cidr && $cidr !~ /\/0$/) { # big in Net::Netmask
+				$v = $cidr;
+				TRACE("'$1' -> '$v'\n");
+			}
+		}
+
+		$out{$k} = $v;
+	}
+
+	DUMP('%out',\%out);
+	return \%out;
 }
 
 
@@ -244,11 +296,6 @@ sub host2ip {
 		return $host;
 	}
 }
-
-
-#sub whois {
-#	return whoisip_query(shift);
-#}
 
 
 sub recreate_tables {
@@ -300,27 +347,23 @@ sub DUMP {
 __DATA__
 
 
-#DROP TABLE IF EXISTS `netas`;
-#CREATE TABLE netas (
-#	netas_id VARCHAR(8) NOT NULL PRIMARY KEY,
-#	descr VARCHAR(32)
-#);
-
 DROP TABLE IF EXISTS `submission`;
 CREATE TABLE submission (
 	submission_id INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	t DATETIME NOT NULL,
-	ip VARCHAR(15),
-	host VARCHAR(255),
 	module VARCHAR(48) NOT NULL,
 	version DECIMAL(5,2) NOT NULL,
 	os VARCHAR(8),
 	arch VARCHAR(32),
 	perl DECIMAL(8,6),
+	ip VARCHAR(15),
+	host VARCHAR(255),
 	agent VARCHAR(255),
-	asn VARCHAR(8),
-	route VARCHAR(18),
-	origin VARCHAR(64)
+	cidr VARCHAR(18),
+	orgname VARCHAR(64),
+	ris_asn VARCHAR(8),
+	ris_route VARCHAR(18),
+	ris_origin VARCHAR(64)
 );
 
 __END__
