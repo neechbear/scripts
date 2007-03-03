@@ -192,6 +192,7 @@ sub insert_row {
 
 sub first_cidr {
 	for (@_) {
+		next unless defined $_;
 		if (/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2})\b/) {
 			return $1;
 		}
