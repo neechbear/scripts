@@ -28,13 +28,21 @@ use IO::Socket;
 use Data::Dumper qw(Dumper);
 
 my $qry = shift || die "Syntax: $0 <ip>\n";
-print Dumper(routes($qry));
+print Dumper(best_route($qry));
 
 exit;
 
 
 sub best_route {
+	my $qty = shift;
 
+	my $route = (sort {
+			(split(/\//,$b->{route}))[1]
+				<=>
+			(split(/\//,$a->{route}))[1]
+		} @{routes($qty)})[0];
+
+	return $route;
 }
 
 
