@@ -4,7 +4,7 @@
 use strict;
 use Data::Dumper;
 use vars qw($VERSION);
-$VERSION = sprintf('%d.%02d', q$Revision: 1.1 $ =~ /(\d+)/g);
+$VERSION = sprintf('%d.%02d', q$Revision$ =~ /(\d+)/g);
 
 my @files = ();
 for (@ARGV) {

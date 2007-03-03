@@ -138,7 +138,7 @@ L<http://www.sms2email.com>, ~/.sms2emailrc
 
 =head1 VERSION
 
-$Id: XSLT.pm 898 2007-01-04 22:43:26Z nicolaw $
+$Id$
 
 =head1 AUTHOR
 

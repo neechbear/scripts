@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 ############################################################
 #
-#   $Id: SendSMS.pl 866 2006-12-24 17:02:07Z nicolaw $
+#   $Id$
 #   SendSMS.pl - Send SMS Text Messages via TextAnywhere.net's SOAP WebService
 #
 #   Copyright 2007 Nicola Worthington
@@ -28,7 +28,7 @@ use strict;
 use warnings;
 use SOAP::Lite qw();
 
-our $VERSION = sprintf('%d.%02d', q$Revision: 1.11 $ =~ /(\d+)/g);
+our $VERSION = sprintf('%d.%02d', q$Revision$ =~ /(\d+)/g);
 our $DEBUG ||= $ENV{DEBUG} ? 1 : 0;
 (our $SELF = $0) =~ s/.*\///;
 

@@ -10,7 +10,7 @@ use Getopt::Std ();
 use lib qw(./);
 
 use vars qw($VERSION);
-$VERSION = sprintf('%d.%02d', q$Revision: 1.2 $ =~ /(\d+)/g);
+$VERSION = sprintf('%d.%02d', q$Revision$ =~ /(\d+)/g);
 
 # Get options
 my $opt = {};

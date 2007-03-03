@@ -13,7 +13,7 @@ use IMDB::Movie;
 use Term::ReadLine;
 use vars qw($VERSION);
 
-$VERSION = sprintf('%d.%02d', q$Revision: 1.1 $ =~ /(\d+)/g);
+$VERSION = sprintf('%d.%02d', q$Revision$ =~ /(\d+)/g);
 (our $SELF = $0) =~ s|^.*/||;
 
 our $term = new Term::ReadLine $SELF;

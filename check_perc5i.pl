@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 ############################################################
 #
-#   $Id: check_perc5i.pl 866 2006-12-24 17:02:07Z nicolaw $
+#   $Id$
 #   check_perc5i.pl - Nagios plugin for PERC5/i RAID controllers using MegaCli
 #
 #   Copyright 2006,2007 Nicola Worthington
@@ -26,7 +26,7 @@ use strict;
 use vars qw($VERSION);
 
 %ENV = ( PATH => '/bin:/usr/bin:/sbin:/usr/sbin' );
-$VERSION = '0.02' || sprintf('%d', q$Revision: 809 $ =~ /(\d+)/g);
+$VERSION = '0.02' || sprintf('%d', q$Revision$ =~ /(\d+)/g);
 
 # Try and run the MegaCli command
 my $raw = '';

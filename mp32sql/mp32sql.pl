@@ -120,7 +120,7 @@ FOO
 }
 
 sub version {
-	printf "%s\n",'$Id: mp32sql.pl,v 1.3 2004/10/19 20:02:19 nicolaw Exp $';
+	printf "%s\n",'$Id$';
 	exit 0;
 }
 

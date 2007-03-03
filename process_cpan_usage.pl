@@ -1,7 +1,7 @@
 #!/usr/bin/perl -wT
 ############################################################
 #
-#   $Id: process_cpan_usage.pl 866 2006-12-24 17:02:07Z nicolaw $
+#   $Id$
 #   process_cpan_usage.pl - Parse Weblogs for CPAN Module Install Submissions
 #
 #   Copyright 2007 Nicola Worthington
@@ -37,7 +37,7 @@ use File::Basename qw(basename);
 use Socket;
 
 use vars qw($VERSION $DEBUG);
-$VERSION = '0.01' || sprintf('%d', q$Revision: 956 $ =~ /(\d+)/g);
+$VERSION = '0.01' || sprintf('%d', q$Revision$ =~ /(\d+)/g);
 $DEBUG = $ENV{DEBUG} ? 1 : 0;
 
 $| = 1;
@@ -256,6 +256,8 @@ SELECT Module,Version, COUNT(*) AS Installs
 		AND ip NOT LIKE "132.185.144.%"
 		AND ip NOT LIKE "85.158.42.2%"
 		AND host NOT LIKE "%.tfb.net"
+		AND netas_id != "AS35425"
+		AND netas_id != "AS25108"
 		AND module IN (
 			"Parse::DMIDecode","WWW::WebStore::TinyURL","Colloquy::Data",
 			"Colloquy::Bot::Simple","Apache2::AuthColloquy","WWW::VenusEnvy",

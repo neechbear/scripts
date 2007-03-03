@@ -120,7 +120,7 @@ FOO
 }
 
 sub version {
-	printf "%s\n",'$Id: sql2m3u.pl,v 1.4 2004/10/20 10:37:24 nicolaw Exp $';
+	printf "%s\n",'$Id$';
 	exit 0;
 }
 

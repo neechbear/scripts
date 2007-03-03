@@ -31,7 +31,7 @@ use File::Temp ();
 use constant DEBUG => $ENV{DEBUG} ? 1 : 0;
 use vars qw($VERSION);
 use subs qw(die);
-($VERSION) = ('$Revision: 1.5 $' =~ /([\d\.]+)/ );
+($VERSION) = ('$Revision$' =~ /([\d\.]+)/ );
 
 
 
@@ -50,7 +50,7 @@ my $self = __PACKAGE__->init;
 DUMP('$self',$self);
 $self->process_command_line_options($self);
 if ($self->{version}) {
-	print '$Id: backup.pl,v 1.5 2004/10/15 11:18:57 nicolaw Exp $'."\n";
+	print '$Id$'."\n";
 	exit 1;
 }
 
@@ -724,7 +724,7 @@ backup.pl - Generic extendable backup script
 
 =head1 VERSION
 
-$Revision: 1.5 $
+$Revision$
 
 
 
@@ -1118,7 +1118,7 @@ Nicola Worthington <nicolaworthington@msn.com>
 
 http://www.nicolaworthington.com
 
-$Author: nicolaw $
+$Author$
 
 =cut
 

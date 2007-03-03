@@ -6,7 +6,7 @@ use LWP::UserAgent;
 use Getopt::Std qw();
 
 use vars qw($VERSION);
-($VERSION) = ('$Revision: 1.2 $' =~ /([\d\.]+)/);
+($VERSION) = ('$Revision$' =~ /([\d\.]+)/);
 
 my $opts = {};
 Getopt::Std::getopt('shv', $opts);
@@ -16,7 +16,7 @@ if (exists $opts->{h}) {
 	Pod::Usage::pod2usage(-verbose => 2);
 	exit;
 } elsif (exists $opts->{v}) {
-	print '$Id: check_link_valididity.pl,v 1.2 2004/11/24 18:00:48 nicolaw Exp $'."\n";
+	print '$Id$'."\n";
 	exit;
 }
 
@@ -70,7 +70,7 @@ Does what it says on the tin.
 
 =head1 VERSION
 
-$Revision: 1.2 $
+$Revision$
 
 =head1 AUTHOR
 
@@ -78,7 +78,7 @@ Nicola Elizabeth Worthington <nicolaworthington@msn.com>
 
 http://www.nicolaworthington.com
 
-$Author: nicolaw $
+$Author$
 
 =head1 CHANGES
 
