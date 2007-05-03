@@ -61,7 +61,9 @@ for my $cfg (@cfgs) {
 	my ($state,$state_str) = get_vm_state($vm);	
 
 	$status{basename($cfg)}->{state} = $state_str;
-	$rtn = 2 unless $state == 1;
+	if    ($rtn <= 1 && $state == 3)   { $rtn = 1; } # Warning if "suspended"
+	elsif ($rtn != 2 && $state == 5)   { $rtn = 3; } # Unknown if "unknown"
+	elsif ($state != 1 && $state != 3) { $rtn = 2; } # Critical if not "on" or "paused"
 }
 
 # Build a nagios status string
