@@ -1,0 +1,194 @@
+#!/usr/bin/perl -w
+############################################################
+#
+#   $Id: check_bandwidth.pl 968 2007-03-03 22:04:15Z nicolaw $
+#   check_bandwidth.pl - Nagios check network traffic utilisation plugin
+#
+#   Copyright 2007 Nicola Worthington
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+############################################################
+# vim:ts=4:sw=4:tw=78
+
+# nicolaw@arwen:/home/system/nagios/libexec $  /home/system/nagios/libexec/check_netraf2 -r 0.5:100 -R 0.1:1000 -t 1:200 -T 0.1:500
+# OK - TX 0.2 kbps / RX 0.3 kbps average over 10 seconds. 
+
+use constant TRANSMIT_WARNING  => '30:1024'; # Less that 30 kbps or more than 1024 kbps
+use constant RECEIVE_WARNING   => '30:1024'; # Less than 30 kbps or more than 1024 kbps 
+use constant TRANSMIT_CRITICAL => '5:4096';  # Less than 5 kbps or more than 4095 kbps
+use constant RECEIVE_CRITICAL  => '5:4096';  # Less than 5 kbps or more than 4096 kbps
+use constant INTERFACE         => 'eth0';
+use constant STATE_FILE        => '/tmp/check_bandwidth.dat';
+
+use 5.6.1;
+use strict;
+use warnings;
+use Getopt::Std qw();
+use File::Basename qw(basename);
+use File::Copy qw();
+use Data::Dumper qw(Dumper);
+
+# Define the usual suspects
+our $VERSION = '0.01';
+(our $SELF = $0) =~ s/.*\///;
+our @NAGIOS_RTN = qw(OK WARNING CRITICAL UNKNOWN);
+
+# Parse command line options
+my $opts = {
+		s => STATE_FILE,
+		i => INTERFACE,
+		t => TRANSMIT_WARNING,
+		r => RECEIVE_WARNING,
+		T => TRANSMIT_CRITICAL,
+		R => RECEIVE_CRITICAL,
+	};
+Getopt::Std::getopts('vhi:r:t:R:T:', $opts);
+display_help(), exit if exists $opts->{h};
+display_version(), exit if exists $opts->{v};
+
+my %threshold;
+for (qw(r t R T)) {
+	if ($opts->{$_} =~ /^\s*(\d*):(\d*)\s*$/) {
+		$threshold{uc("${_}X")}->{MINIMUM}->{uc($_) eq $_ ? 'CRITICAL' : 'WARNING'} = $1;
+		$threshold{uc("${_}X")}->{MAXIMUM}->{uc($_) eq $_ ? 'CRITICAL' : 'WARNING'} = $2;
+	}
+}
+
+my $state_file = STATE_FILE.".$opts->{i}";
+
+my $sleep = 0;
+unless (-e $state_file) {
+	File::Copy::copy('/proc/net/dev', $state_file) ||
+		nagios_response(3, "Unable to copy state data from file '/proc/net/dev' to '$state_file': $!");
+	$sleep = 10;
+}
+
+my ($age1,$traf1) = parse_data($state_file);
+nagios_response(3, "No traffic information for interface '$opts->{i}'") unless defined $traf1->{$opts->{i}};
+$traf1 = $traf1->{$opts->{i}};
+
+sleep $sleep;
+
+my ($age2,$traf2) = parse_data('/proc/net/dev');
+nagios_response(3, "No traffic information for interface '$opts->{i}'") unless defined $traf2->{$opts->{i}};
+$traf2 = $traf2->{$opts->{i}};
+
+File::Copy::copy('/proc/net/dev', $state_file) ||
+	nagios_response(3, "Unable to copy state data from file '/proc/net/dev' to '$state_file': $!");
+
+my $secs = $age1;
+my $RXkbps = sprintf('%.1f', (($traf2->{RXbytes} - $traf1->{RXbytes}) / $secs) / 1024);
+my $TXkbps = sprintf('%.1f', (($traf2->{TXbytes} - $traf1->{TXbytes}) / $secs) / 1024);
+
+my $rtn = 0;
+my @msg;
+
+if (defined $threshold{RX}->{MINIMUM}->{CRITICAL} && $RXkbps < $threshold{RX}->{MINIMUM}->{CRITICAL}) {
+	push @msg, "RX $RXkbps kbps is less than $threshold{RX}->{MINIMUM}->{CRITICAL} kbps";
+	$rtn = 2;
+} elsif (defined $threshold{RX}->{MINIMUM}->{WARNING} && $RXkbps < $threshold{RX}->{MINIMUM}->{WARNING}) {
+	push @msg, "RX $RXkbps kbps is less than $threshold{RX}->{MINIMUM}->{WARNING} kbps";
+	$rtn = 1 if $rtn <= 1;
+}
+
+if (defined $threshold{RX}->{MAXIMUM}->{CRITICAL} && $RXkbps > $threshold{RX}->{MAXIMUM}->{CRITICAL}) {
+	push @msg, "RX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{CRITICAL} kbps";
+	$rtn = 2;
+} elsif (defined $threshold{RX}->{MAXIMUM}->{WARNING} && $RXkbps > $threshold{RX}->{MAXIMUM}->{WARNING}) {
+	push @msg, "RX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{WARNING} kbps";
+	$rtn = 1 if $rtn <= 1;
+}
+
+if (defined $threshold{RX}->{MINIMUM}->{CRITICAL} && $TXkbps < $threshold{RX}->{MINIMUM}->{CRITICAL}) {
+	push @msg, "TX $RXkbps kbps is less than $threshold{RX}->{MINIMUM}->{CRITICAL} kbps";
+	$rtn = 2;
+} elsif (defined $threshold{RX}->{MINIMUM}->{WARNING} && $TXkbps < $threshold{RX}->{MINIMUM}->{WARNING}) {
+	push @msg, "TX $RXkbps kbps is less than $threshold{RX}->{MINIMUM}->{WARNING} kbps";
+	$rtn = 1 if $rtn <= 1;
+}
+
+if (defined $threshold{RX}->{MAXIMUM}->{CRITICAL} && $TXkbps > $threshold{RX}->{MAXIMUM}->{CRITICAL}) {
+	push @msg, "TX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{CRITICAL} kbps";
+	$rtn = 2;
+} elsif (defined $threshold{RX}->{MAXIMUM}->{WARNING} && $TXkbps > $threshold{RX}->{MAXIMUM}->{WARNING}) {
+	push @msg, "TX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{WARNING} kbps";
+	$rtn = 1 if $rtn <= 1;
+}
+
+nagios_response($rtn, sprintf('TX %.1f kbps / RX %.1f kbps average over %d seconds. %s',
+		$TXkbps, $RXkbps, $secs,
+		join(', ',@msg))
+	);
+
+exit;
+
+
+sub parse_data {
+	my $file = shift;
+
+	nagios_response(3, "Missing data file '$file'") unless -f $file;
+	nagios_response(3, "Unable to read data file '$file'") unless -r $file;
+	#nagios_response(3, "Empty data file '$file'") unless -s $file;
+
+	my %traf;
+	my $age = time - (stat($file))[9];
+	my @cols = qw(RXbytes RXpackets RXerrs RXdrop RXfifo RXframe RXcompressed RXmulticast
+				TXbytes TXpackets TXerrs TXdrop TXfifo TXcolls TXcarrier TXcompressed);
+
+	open(FH,'<',$file) || nagios_response(3, "Unable to open data file '$file': $!");
+	while (local $_ = <FH>) {
+		if (my ($int,$data) = $_ =~ /^\s*(\S+):\s*(.+)/) {
+			my %tmp;
+			@tmp{@cols} = split(/\s+/,$data);
+			$traf{$int} = \%tmp;
+		}
+	}
+	close(FH);
+
+	return ($age, \%traf);
+}
+
+sub nagios_response {
+	my ($rtn,$msg) = @_;
+
+	$rtn = 3 if !defined($rtn) || !defined($NAGIOS_RTN[$rtn]);
+	$msg = '(No output)' unless defined $msg && $msg =~ /\S+/;
+	$msg =~ s/[\r\n]+/ /g;
+
+	print "$NAGIOS_RTN[$rtn] - $msg\n";
+	exit $rtn;
+}
+
+sub display_help {
+display_version();
+print qq{Syntax: $SELF [[-v|-h] | [-i <interface] [-r <min:max>] [-t <min:max>]
+                                                 [-R <min:max>] [-T <min:max>]]
+      -v              Display version information
+      -h              Display this help information
+      -i <interface>  Interface to monitor
+      -r <min:max>    Minimum and maximum inbound kbps for warning alert
+      -t <min:max>    Minimum and maximum outbound kbps for warning alert
+      -R <min:max>    Minimum and maximum inbound kbps for critical alert
+      -T <min:max>    Minimum and maximum outbound kbps for critical alert
+};
+}
+
+sub display_version {
+	print "$SELF version $VERSION\n";
+}
+
+
+__END__
+
+
