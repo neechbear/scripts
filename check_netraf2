@@ -59,10 +59,12 @@ display_version(), exit if exists $opts->{v};
 
 my %threshold;
 for (qw(r t R T)) {
-	if ($opts->{$_} =~ /^\s*(\d*):(\d*)\s*$/) {
-		$threshold{uc("${_}X")}->{MINIMUM}->{uc($_) eq $_ ? 'CRITICAL' : 'WARNING'} = $1;
-		$threshold{uc("${_}X")}->{MAXIMUM}->{uc($_) eq $_ ? 'CRITICAL' : 'WARNING'} = $2;
-	}
+	next unless defined $opts->{$_} && $opts->{$_} =~ /^\s*(\d*):(\d*)\s*$/;
+	$opts->{$_} =~ s/\s+//g;
+	my @x = split(/:/,$opts->{$_});
+	for (@x) { $_ = undef unless $_ =~ /\d+/; }
+	($threshold{uc("${_}X")}->{MINIMUM}->{uc($_) eq $_ ? 'CRITICAL' : 'WARNING'},
+	 $threshold{uc("${_}X")}->{MAXIMUM}->{uc($_) eq $_ ? 'CRITICAL' : 'WARNING'}) = @x;
 }
 
 my $state_file = STATE_FILE.".$opts->{i}";
