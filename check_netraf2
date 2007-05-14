@@ -105,10 +105,10 @@ if (defined $threshold{RX}->{MINIMUM}->{CRITICAL} && $RXkbps < $threshold{RX}->{
 }
 
 if (defined $threshold{RX}->{MAXIMUM}->{CRITICAL} && $RXkbps > $threshold{RX}->{MAXIMUM}->{CRITICAL}) {
-	push @msg, "RX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{CRITICAL} kbps";
+	push @msg, "RX $RXkbps kbps is more than $threshold{RX}->{MAXIMUM}->{CRITICAL} kbps";
 	$rtn = 2;
 } elsif (defined $threshold{RX}->{MAXIMUM}->{WARNING} && $RXkbps > $threshold{RX}->{MAXIMUM}->{WARNING}) {
-	push @msg, "RX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{WARNING} kbps";
+	push @msg, "RX $RXkbps kbps is more than $threshold{RX}->{MAXIMUM}->{WARNING} kbps";
 	$rtn = 1 if $rtn <= 1;
 }
 
@@ -121,10 +121,10 @@ if (defined $threshold{RX}->{MINIMUM}->{CRITICAL} && $TXkbps < $threshold{RX}->{
 }
 
 if (defined $threshold{RX}->{MAXIMUM}->{CRITICAL} && $TXkbps > $threshold{RX}->{MAXIMUM}->{CRITICAL}) {
-	push @msg, "TX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{CRITICAL} kbps";
+	push @msg, "TX $RXkbps kbps is more than $threshold{RX}->{MAXIMUM}->{CRITICAL} kbps";
 	$rtn = 2;
 } elsif (defined $threshold{RX}->{MAXIMUM}->{WARNING} && $TXkbps > $threshold{RX}->{MAXIMUM}->{WARNING}) {
-	push @msg, "TX $RXkbps kbps is less than $threshold{RX}->{MAXIMUM}->{WARNING} kbps";
+	push @msg, "TX $RXkbps kbps is more than $threshold{RX}->{MAXIMUM}->{WARNING} kbps";
 	$rtn = 1 if $rtn <= 1;
 }
 
