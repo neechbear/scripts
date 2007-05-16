@@ -120,7 +120,7 @@ sub nagios_response {
 	my ($rtn,$msg) = @_;
 
 	$rtn = 3 unless defined $rtn || defined $NAGIOS_RTN[$rtn];
-	$msg = 'Unknown state' unless defined $msg && $msg =~ /\S+/;
+	$msg = '(No output)' unless defined $msg && $msg =~ /\S+/;
 	$msg =~ s/[\r\n]+/ /g;
 
 	print "$NAGIOS_RTN[$rtn] - $msg\n";
