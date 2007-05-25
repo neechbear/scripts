@@ -56,6 +56,12 @@ if (exists $alert->{$mib}->{$trapid}->[0]) {
 			$alert->{$mib}->{$trapid}->[0],
 			$msg,
 		);
+} else {
+	submit_Passive_Nagios_Check(NAGIOS_CMD_FILE,
+			$trap->hostname,
+			3,
+			$trap->trapname,
+		);
 }
 
 closelog();
@@ -148,6 +154,7 @@ __END__
 # }
 #############################
 
+# BMC
 SNMPv2-SMI::enterprises.3183.1.1.0
 	262402	2	Generic Critical Fan Failure
 	262530	0	Generic Critical Fan Failure Cleared
@@ -220,8 +227,22 @@ SNMPv2-SMI::enterprises.3183.1.1.0
 	2322178	2	ASR (Automatic System Recovery) Power Down Occurred
 	2322179	2	ASR (Automatic System Recovery) Power Cycle Occurred
 	
+# RAC
 SNMPv2-SMI::enterprises.674.10892.2.0
 	1001	0	Test Message: TEST TRAP
+	1002	1	RAC Authentication failures during a time period have exceeded a threshold. "RAC login failure caused by authentication failure, number of concurrent logins exceed limit, or permission denied."
+	1003	2	The RAC cannot communicate with the baseboard management controller (ESM). RAC lost communication with ESM.
+	1005	2	The RAC has detected a system power state change to powered-off. RAC detected a system power state change to power-off.
+	1007	2	The RAC has detected that the system watchdog has expired indicating a system hang. RAC has detected the system watchdog expired (normally indicating a system hang).
+	1008	1	The RAC Battery charge is below 25% indicating that the battery may only be able to power the DRSC for 8-10 minutes. RAC detected its battery charge is below 25% full.
+	1010	1	The RAC Temperature probe has detected a Warning value. RAC temperature probe reading exceeded warning threshold.
+	1011	2	The RAC Temperature probe has detected a failure (or critical) value. RAC temperature probe reading exceeded critical threshold.
+	1013	1	The RAC voltage probe has detected a warning value. RAC voltage probe reading exceeded warning threshold.
+	1014	2	The RAC voltage probe has detected a failure (or critical) value. RAC voltage probe reading exceeded critical threshold.
+	1016	2	The RAC has detected a new event in the System Event Log with Severity: Critical. RAC detected a new system event log with critical severity (detailed log info is in drsAlert Message varbind).
+
+# OpenManage?
+SNMPv2-SMI::enterprises.674.10892.2.0
 	1004	2	Thermal shutdown protection has been initiated
 	1052	0	Temperature sensor returned to a normal value
 	1053	1	Temperature sensor detected a warning value
