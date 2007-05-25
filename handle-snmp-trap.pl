@@ -239,7 +239,12 @@ SNMPv2-SMI::enterprises.674.10892.2.0
 	1011	2	The RAC Temperature probe has detected a failure (or critical) value. RAC temperature probe reading exceeded critical threshold.
 	1013	1	The RAC voltage probe has detected a warning value. RAC voltage probe reading exceeded warning threshold.
 	1014	2	The RAC voltage probe has detected a failure (or critical) value. RAC voltage probe reading exceeded critical threshold.
+	1015	2	The RAC has detected a new event in the System Event Log with Severity: Warning. RAC detected a new system event log with warning severity (detailed log info is in drsAlert Message varbind).
 	1016	2	The RAC has detected a new event in the System Event Log with Severity: Critical. RAC detected a new system event log with critical severity (detailed log info is in drsAlert Message varbind).
+	1017	2	The RAC system event log is 80% full. RAC detected system event log is 80% full.
+	1018	2	The RAC system event log is 90% full. RAC detected system event log is 90% full.
+	1019	2	The RAC system event log is 100% full. RAC detected system event log is 100% full.
+	1020	0	The RAC has detected a new event in the System Event Log with Severity: Normal. RAC detected a new system event log with normal severity (detailed log info is in drsAlert Message varbind).
 
 # OpenManage?
 SNMPv2-SMI::enterprises.674.10892.2.0
