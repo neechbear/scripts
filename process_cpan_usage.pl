@@ -355,7 +355,7 @@ CREATE TABLE submission (
 	module VARCHAR(48) NOT NULL,
 	version DECIMAL(5,2) NOT NULL,
 	os VARCHAR(8),
-	arch VARCHAR(32),
+	arch VARCHAR(48),
 	perl DECIMAL(8,6),
 	ip VARCHAR(15),
 	host VARCHAR(255),

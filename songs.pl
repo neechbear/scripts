@@ -140,6 +140,7 @@ Carole King - Forever Young
 Cher - Believe
 Chris Rea - 
 Chris Rea - The Road To Hell (Part II)
+Christopher Tin - Baba Yetu
 Chumbawamba - Tub Thumping
 Cindy Lauper - Girls Just Want To Have Fun
 Coldplay - Yellow
@@ -170,6 +171,7 @@ Enya - Orinoco Flow Sail Away
 Erasure - Oh L'Amour
 Fine Young Cannibals - Good Thing
 Fine Young Cannibals - She Drives Me Crazy
+Fleetwood Mac - Little Lies
 Garbage - Stupid Girl
 Hanson - Mmmbop
 Hazel O'Conner - Will You
@@ -195,6 +197,8 @@ Kylie Minogue - Can't Get You Out Of My Head
 Kylie Minogue - Fever
 Kylie Minogue - I Should Be So Lucky
 Kylie Minogue - Spinnig Around
+The Littlest Hobo - Title Theme
+Lance Gambit Trio - Left Bank 2
 Lemonheads - Being Around
 Lemonheads - Big Gay Heart
 Lemonheads - Down About It
