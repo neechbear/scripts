@@ -31,7 +31,7 @@ use constant NAGIOS_CMD_FILE => '/home/nagios/var/rw/nagios.cmd';
 use constant NAGIOS_SERVICE  => 'Dell OpenManage';
 use constant PROCESS_SERVICE_CHECK_RESULT => "[%d] PROCESS_SERVICE_CHECK_RESULT;%s;%s;%s;%s\n";
 
-my @NAGIOS_CODES = qw(OK WARNING CRITICAL UNKONWN);
+my @NAGIOS_CODES = qw(OK WARNING CRITICAL UNKNOWN);
 (my $SELF = $0) =~ s/.*\///;
 
 openlog($SELF, 'cons,pid', 'local3');
