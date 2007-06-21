@@ -156,6 +156,7 @@ __END__
 
 # BMC
 SNMPv2-SMI::enterprises.3183.1.1.0
+	0	0	Test Message: TEST TRAP
 	262402	2	Generic Critical Fan Failure
 	262530	0	Generic Critical Fan Failure Cleared
 	131330	2	Under-Voltage Problem (Lower Critical - going low)
