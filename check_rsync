@@ -1,0 +1,131 @@
+#!/bin/bash
+# Written by Nicola Worthington after she got fucked off with the broken perl version
+# that didn't work properly with the Nagios ePN
+
+PROGNAME=`/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+REVISION=`echo '$Revision: 1.0 $' | sed -e 's/[^0-9.]//g'`
+
+if test -e $PROGPATH/utils.sh; then
+	. $PROGPATH/utils.sh
+else
+	. /usr/lib/nagios/plugins/utils.sh
+fi
+
+print_usage() {
+    #echo "Usage: $PROGNAME -H hostname -p port -m module -t timeout"
+    echo "Usage: $PROGNAME -H hostname -p port -t timeout"
+    echo "Usage: $PROGNAME --help"
+    echo "Usage: $PROGNAME --version"
+}
+
+print_help() {
+    print_revision $PROGNAME $REVISION
+    echo ""
+    print_usage
+    echo ""
+    echo "Rsync service plugin for Nagios"
+    echo ""
+    support
+}
+
+# Make sure the correct number of command line
+# arguments have been supplied
+
+if [ $# -lt 1 ]; then
+    print_usage
+    exit $STATE_UNKNOWN
+fi
+
+exitstatus=$STATE_WARNING #default
+while test -n "$1"; do
+    case "$1" in
+        --help)
+            print_help
+            exit $STATE_OK
+            ;;
+        -h)
+            print_help
+            exit $STATE_OK
+            ;;
+        --version)
+            print_revision $PROGNAME $VERSION
+            exit $STATE_OK
+            ;;
+        -V)
+            print_revision $PROGNAME $VERSION
+            exit $STATE_OK
+            ;;
+        --hostname)
+            hostname=$2
+            shift
+            ;;
+        -H)
+            hostname=$2
+            shift
+            ;;
+        --port)
+            port=$2
+            shift
+            ;;
+        -p)
+            port=$2
+            shift
+            ;;
+        --module)
+            module=$2
+            shift
+            ;;
+        -m)
+            module=$2
+            shift
+            ;;
+        --timeout)
+            timeout=$2
+            shift
+            ;;
+        -t)
+            timeout=$2
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            print_usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+    shift
+done
+
+# Default port to 873
+if test -z "$port" || echo "$port" | egrep "[^0-9]" >/dev/null 2>&1; then
+	port=873
+fi
+
+# Default timeout to 30 seconds
+if test -z "$timeout" || echo "$timeout" | egrep "[^0-9]" >/dev/null 2>&1; then
+	timeout=30
+fi
+
+# Barf on missing hostname information
+if test -z "$hostname" || echo "$hostname" | pcregrep  "[^a-zA-Z0-9\.\-_]" >/dev/null 2>&1; then
+	echo "Illegal or missing hostname: $hostname"
+	print_usage
+	exit $STATE_UNKNOWN
+fi
+	
+# Get a list of modules to see if rsync is up
+str=`/usr/bin/rsync --timeout=$timeout --port=$port rsync://$hostname 2>&1 | perl -pe 's/[\r\n]/ /g'`
+rtn=$?
+
+if [ "x$rtn" == "x0" ]; then
+	echo "RSYNC OK - Connected to rsync://$hostname on port $port: $str"
+	exit 0
+else
+	echo "RSYNC CRITICAL - Failed with error $rtn connecting to rsync://$hostname on port $port: $str"
+	exit 2
+fi
+
+exit $exitstatus
+
+
