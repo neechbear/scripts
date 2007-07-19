@@ -1,0 +1,57 @@
+#!/bin/bash
+
+AVI=$1
+MP3=$2
+WAV=`tempfile 2>/dev/null`
+
+if test -z "$WAV"; then
+	WAV=/var/tmp/avi2mp3-$$.wav
+	if test -e "$WAV"; then
+		echo "Temporary file '$WAV' already exists; aborting."
+		exit
+	else
+		touch "$WAV"
+	fi
+fi
+
+if test -z "$MP3"; then
+	MP3=`echo "$AVI" | sed 's/\.avi$/.mp3/i'`
+fi
+
+if test -z "$AVI" || test -z "$MP3"; then
+	echo "Syntax: avi2mp3 <input.avi> <output.mp3>"
+	exit
+fi
+
+if ! test -e "$AVI"; then
+	echo "File '$AVI' does not exist."
+	exit
+fi
+
+if ! test -s "$AVI"; then
+	echo "File '$AVI' is empty."
+	exit
+fi
+
+#if test -e "$WAV"; then
+#	echo "Temporary file '$WAV' already exists; aborting."
+#	exit
+#fi
+
+if test -e "$MP3"; then
+	echo "Target file '$MP3' already exists; aborting."
+	exit
+fi
+
+echo "$AVI => $MP3"
+#exit
+
+echo "Extracting audio track with mplayer ..."
+mplayer -really-quiet -quiet -vc null -vo null -ao pcm:file=%`expr length "${WAV}"`%"${WAV}" "${AVI}" \
+	&& echo "Encoding audio track with lame ..." && lame "${WAV}" "${MP3}" \
+	&& rm -fv "${WAV}"
+
+rm -f "$WAV"
+ls -alh "$AVI" "$MP3"
+
+
