@@ -1,0 +1,64 @@
+#!/usr/bin/perl -w
+
+use 5.004;
+use strict;
+
+my $host = shift || '';
+unless ($host) {
+	eval {
+		require POSIX;
+		$host = (POSIX::uname())[1];
+	}
+}
+
+while (local $_ = <DATA>) {
+	last if /__END__/;
+	if (/\@\@FIGLET\@\@/i) {
+		if (defined $host && length $host && $host) {
+		        my @str = split(/\n/,`figlet -w 75 $host`);
+		        for (@str) {
+		                my $spaces = 79 - 4 - length($_);
+				my $line = "#  $_". ' ' x $spaces ."#\n";
+				(my $shell_line = $line) =~ s/([`])/\\$1/g;
+				print $shell_line;
+	        	}
+		}
+	} else {
+		print;
+	}
+}
+
+exit;
+
+
+__DATA__
+cat >/etc/issue.net <<END
+###############################################################################
+#                                                                             #
+#                                  WARNING!                                   #
+#                                                                             #
+#                     THIS IS A PRIVATE COMPUTER SYSTEM.                      #
+#                                                                             #
+#  Disconnect  NOW  if you have  not been  expressly authorised  to use this  #
+#  system.  Unauthorised use is a criminal offence under the Computer Misuse  #
+#  Act 1990.  Communications  on or  through  this computer  system  may  be  #
+#  monitored or recorded to secure effective system  operation and for other  #
+#  lawful purposes.                                                           #
+#                                                                             #
+###############################################################################
+END
+/bin/cp -f /etc/issue.net /etc/issue
+/bin/rm -f /etc/banner /etc/ssh/banner
+/bin/ln -s /etc/issue.net /etc/ssh/banner
+/bin/ln -s /etc/issue.net /etc/banner
+cat >/etc/motd <<END
+###############################################################################
+@@FIGLET@@
+#                                                                             #
+#  This is a private machine.                        W: xxxxxxxxxxxxxxxxxx    #
+#  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              T: xxxxxxxxxxxxxxxxxxxx  #
+#  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    F: xxxxxxxxxxxxxxxxxxxx  #
+#                                                                             #
+###############################################################################
+END
+__END__
