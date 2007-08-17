@@ -48,16 +48,15 @@ cat >/etc/issue.net <<END
 ###############################################################################
 END
 /bin/cp -f /etc/issue.net /etc/issue
-/bin/rm -f /etc/banner /etc/ssh/banner
-/bin/ln -s /etc/issue.net /etc/ssh/banner
-/bin/ln -s /etc/issue.net /etc/banner
+perl -pi.bak -e 's/^\s*#?\s*Banner\s+.*$/Banner \/etc\/issue.net/' /etc/ssh/sshd_config
+if test -e /etc/init.d/ssh ; then /etc/init.d/ssh restart ; else /etc/init.d/sshd restart ; fi
 cat >/etc/motd <<END
 ###############################################################################
 @@FIGLET@@
 #                                                                             #
-#  This is a private machine.                        W: xxxxxxxxxxxxxxxxxx    #
-#  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              T: xxxxxxxxxxxxxxxxxxxx  #
-#  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    F: xxxxxxxxxxxxxxxxxxxx  #
+#  This is a private machine.                        W: http://www.tfb.net    #
+#  Nicola Worthington <nicolaw@tfb.net>              T: +44 (0) 1923 354 368  #
+#  Jennifer Beattie <jen@tfb.net>                    F: +44 (0) 1923 396 559  #
 #                                                                             #
 ###############################################################################
 END
