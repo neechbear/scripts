@@ -14,9 +14,9 @@ my $address_book = Text::vCard::Addressbook->new({
 	});
 
 my @phones = qw(cell home work fax other);
-my $format = "%-30s %-15s %-15s %-15s %-15s %-15s\n";
+my $format = "%-27s %-13s %-13s %-13s %-13s %-13s\n";
 printf($format, 'name',@phones);
-printf($format, '=' x 30, ('=' x 15) x 5);
+printf($format, '=' x 27, ('=' x 13) x 5);
 
 foreach my $vcard ($address_book->vcards()) {
 	my $name = $vcard->FN || build_fullname($vcard);
