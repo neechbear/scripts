@@ -1,5 +1,8 @@
 #!/usr/bin/perl -w
 
+# Nicola Worthington 2007
+# vcf2text.pl backup.vcf | a2ps -l 98
+
 use strict;
 use warnings;
 use Text::vCard::Addressbook qw();
