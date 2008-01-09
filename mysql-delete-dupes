@@ -1,0 +1,110 @@
+#!/usr/bin/perl -wT
+
+# Please start using "ON DUPLICATE KEY" in your SQL syntax.
+# http://dev.mysql.com/doc/refman/5.0/en/insert-on-duplicate.html
+
+use 5.6.1;
+use strict;
+use warnings;
+use DBI qw();
+use Time::HiRes qw(sleep);
+
+use constant DBI_DSN  => 'DBI:mysql:test:127.0.0.1';
+use constant DBI_USER => 'root';
+use constant DBI_PASS => 'password';
+use constant DBI_OPTS => { AutoCommit => 1, RaiseError => 1 };
+
+our $dbh = DBI->connect(DBI_DSN, DBI_USER, DBI_PASS, DBI_OPTS)
+	or die "Failed to connect to DB: $DBI::errstr";
+$SIG{INT} = sub { $dbh->disconnect if $dbh->state; exit; };
+
+for (;;) {
+	is_slave_okay($dbh) ? sleep 3 : sleep 0.2;
+	print "\n";
+}
+
+$dbh->disconnect();
+
+exit;
+
+sub find_key {
+	my ($dbh, $table, $key_id) = @_;
+	return unless defined $dbh
+		&& defined $table
+		&& defined $key_id;
+
+	my @columns;
+	my $last_key_name = '';
+	my $cur_key_num = 0;
+
+	my $sth = $dbh->prepare(sprintf('SHOW INDEX FROM %s', $table));
+	$sth->execute;
+	while (my $href = $sth->fetchrow_hashref) {
+		if ("$href->{Key_name}" ne "$last_key_name") {
+			$cur_key_num++;
+		}
+		push @columns, $href->{Column_name} if $cur_key_num == $key_id;
+		$last_key_name = $href->{Key_name};
+	}
+	$sth->finish;
+
+	return @columns;
+}
+
+sub is_slave_okay {
+	my $dbh = shift;
+
+	my $sth = $dbh->prepare('SHOW SLAVE STATUS');
+	$sth->execute;
+	my $href = $sth->fetchrow_hashref;
+	$sth->finish;
+
+	for (qw(Slave_SQL_Running Slave_IO_Running Last_Error Last_Errno Seconds_Behind_Master)) {
+		printf("%30s: %s\n", $_, defined $href->{$_} ? $href->{$_} : 'NULL');
+	}
+
+	# All is well with the world
+	return 1 if lc($href->{Slave_SQL_Running}) eq 'yes' && lc($href->{Slave_IO_Running}) eq 'yes';
+
+	# Unknown Last_Errno
+	unless ("$href->{Last_Errno}" eq '1062') {
+		warn "WARNING - Unknown Last_Errno: $href->{Last_Errno}";
+		return -1;
+	}
+
+	# Extract values from Last_Error
+	my ($db)      = $href->{Last_Error} =~ /Default database: '(\w+)'\./i;
+	my ($id,$key) = $href->{Last_Error} =~ /Error 'Duplicate entry '(.+?)' for key (\d+)' on query\./i;
+	my ($table)   = $href->{Last_Error} =~ /INSERT INTO ([\w\.]+) /i;
+	warn sprintf("%30s: %s\n", '$db',    (defined $db    ? $db    : 'NULL'));
+	warn sprintf("%30s: %s\n", '$id',    (defined $id    ? $id    : 'NULL'));
+	warn sprintf("%30s: %s\n", '$key',   (defined $key   ? $key   : 'NULL'));
+	warn sprintf("%30s: %s\n", '$table', (defined $table ? $table : 'NULL'));
+
+	# Not enough information
+	unless ($db && $id && $key && $table) {
+		warn "WARNING - Unable to determine valid database, table, key and ID combination.";
+		return -1;
+	}
+
+	# Build the SQL statement to delete
+	my $db_table = $table =~ /\./ ? $table : "$db.$table";
+	my @columns = find_key($dbh, $db_table, $key);
+	my @id = @columns > 1 ? split(/-/, $id, scalar(@columns)) : $id;
+	my $sql = sprintf('DELETE FROM %s WHERE 1 = 1', $db_table);
+	for my $col (@columns) {
+		$sql .= sprintf(' AND %s = ?', $col);
+	}
+
+	# Run the statement
+	warn sprintf("%30s: %s (ID %s)\n", 'Executing SQL', $sql, join(', ',@id));
+	$sth = $dbh->prepare($sql);
+	$sth->execute(@id);
+	$sth->finish;
+
+	$dbh->do('START SLAVE');
+	return;
+}
+
+__END__
+
