@@ -3,7 +3,6 @@
 use 5.6.1;
 use strict;
 use warnings;
-use Term::ProgressBar qw();
 use POSIX qw();
 use Getopt::Std qw();
 
@@ -18,9 +17,9 @@ my %opt = ();
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 Getopt::Std::getopts('i:o:hvql?', \%opt) unless $@;
+(VERSION_MESSAGE() && exit) if defined $opt{v};
 (HELP_MESSAGE() && exit) if defined $opt{h} || defined $opt{'?'};
 (HELP_MESSAGE() && exit) unless defined $opt{i} && defined $opt{o};
-(VERSION_MESSAGE() && exit) if defined $opt{v};
 
 # Define all the record types and their constituent columns
 my %event_columns = (
@@ -69,6 +68,7 @@ my %log_files = map { $_ => 0 } $opt{i} =~ /[\*\?]/
 
 # Count the lines for a progress indicator bar
 unless ($opt{q}) {
+	require Term::ProgressBar;
 	print "Calculating number of rows to process ...\n";
 	for my $log_file (keys %log_files) {
 		open(LOG,'<',$log_file) || die "Unable to open file handle LOG for file '$log_file': $!";
