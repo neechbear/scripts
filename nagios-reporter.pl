@@ -42,7 +42,7 @@ my $opt = {
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-Getopt::Std::getopts('t:r:f:s:u:p:m:U:vh?', $opt);
+Getopt::Std::getopts('T:t:r:f:s:u:p:m:U:vh?', $opt);
 
 (VERSION_MESSAGE() && exit) if defined $opt->{v};
 (HELP_MESSAGE() && exit) if defined $opt->{h} || defined $opt->{'?'};
@@ -64,7 +64,7 @@ warn "$reportUrl\n" if $ENV{DEBUG};
 warn "$subject\n" if $ENV{DEBUG};
 
 my $body = http_request($reportUrl, $opt->{u}, $opt->{p});
-while ($body =~ m,(<link\s+rel=['"]stylesheet['"]\s+.+?href=['"](.+?)['"]\s*>),imsg) { #'
+while ($body =~ m,(<link\s+rel=['"]stylesheet['"]\s+.*?href=['"](.+?)['"].*?>),imsg) { #'
 	my ($link,$cssUrl) = ($1,$2);
 	if ($cssUrl =~ m,^https?://,i) {
 		# Supah!
@@ -75,11 +75,11 @@ while ($body =~ m,(<link\s+rel=['"]stylesheet['"]\s+.+?href=['"](.+?)['"]\s*>),i
 	}
 
 	my $css = http_request($cssUrl, $opt->{u}, $opt->{p});
-	$body =~ s,$link,<style type="text/css">$css</style>,i;
+	$body =~ s,$link,\n<style type="text/css">\n$css\n</style>\n\n,i;
 }
 
 sendmail(
-	$opt->{r}, $opt->{f}, $subject, $body,
+	$opt->{r}, $opt->{f}, $subject, "$body\n",
 	$opt->{t}, $opt->{m}
 	);
 
@@ -134,18 +134,19 @@ sub sendmail {
 	$smtp->datasend("From: $from\n");
 	$smtp->datasend("Subject: $subject\n");
 	$smtp->datasend("MIME-Version: 1.0\n");
-	$smtp->datasend("Content-type: multipart/mixed; boundary=\"boundary\"\n");
+	$smtp->datasend("Content-type: multipart/mixed; boundary=\"zzXXzzXX-boundary-zzXXzzXX\"\n");
 	$smtp->datasend("\n");
 	$smtp->datasend("This is a multi-part message in MIME format.\n");
-	$smtp->datasend("--boundary\n");
+	$smtp->datasend("--zzXXzzXX-boundary-zzXXzzXX\n");
 	$smtp->datasend("Content-type: text/html\n");
-	$smtp->datasend("Content-Disposition: inline\n");
-	$smtp->datasend("Content-Description: Nagios report\n");
-	$smtp->datasend("$body\n");
-	$smtp->datasend("--boundary\n");
+	$smtp->datasend("Content-disposition: inline\n");
+	$smtp->datasend("Content-description: Nagios report\n");
+	$smtp->datasend("Content-length: ".length($body)."\n");
+	$smtp->datasend($body);
+	$smtp->datasend("--zzXXzzXX-boundary-zzXXzzXX\n");
 	$smtp->datasend("Content-type: text/plain\n");
 	$smtp->datasend("Please read the attatchment\n");
-	$smtp->datasend("--boundary--\n");
+	$smtp->datasend("--zzXXzzXX-boundary-zzXXzzXX--\n");
 	$smtp->dataend();
 
 	$smtp->quit;
