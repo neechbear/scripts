@@ -1,0 +1,254 @@
+#!/usr/bin/perl -w
+
+my %email_words = (
+		reboot   => [ qw(nicolaw@arwen.tfb.net jen@sc2tech.com) ],
+		halt     => [ qw(nicolaw@arwen.tfb.net jen@sc2tech.com) ],
+		init     => [ qw(nicolaw@arwen.tfb.net jen@sc2tech.com) ],
+		telinit  => [ qw(nicolaw@arwen.tfb.net jen@sc2tech.com) ],
+		shutdown => [ qw(nicolaw@arwen.tfb.net jen@sc2tech.com) ],
+	);
+
+my %highlight_words = (
+		reboot   => 'bold underline',
+		halt     => 'bold underline',
+		init     => 'bold underline',
+		telinit  => 'bold underline',
+		shutdown => 'bold underline',
+		rm       => 'bold underline',
+		kill     => 'bold underline',
+		killall  => 'bold underline',
+		pkill    => 'bold underline',
+	);
+
+
+
+
+####################################
+#
+#  No user servicable parts inside.
+#  Fiddling with the bits and bobs may invalidate your warranty.
+#
+####################################
+
+
+
+use strict;
+use Socket;
+use Getopt::Std;
+use Term::ANSIColor qw(:constants color uncolor colored);
+use Memoize;
+
+$Term::ANSIColor::AUTORESET = 1;
+END { print uncolor; }
+$SIG{INT} = sub { print uncolor; exit; };
+
+my @colours = qw(red green blue yellow magenta cyan);
+tie our $colour, 'Colour', \@colours;
+
+memoize('session2colour');
+memoize('resolve');
+memoize('host2ip');
+memoize('ip2host');
+memoize('uid2user');
+
+my $opts = {};
+getopt('vhl:s:p:u:', $opts);
+$opts->{l} ||= '/var/log/messages';
+die "Try running me as r00t init!\n" unless -r $opts->{l};
+
+print "Version 1\n",exit if exists $opts->{v};
+print "Syntax: watchbash.pl [-h|-v] [-l log] [-s server] [-u uid] [-p pid]\n",exit if exists $opts->{h};
+
+open(LOG,'-|','/usr/bin/tail','-f',$opts->{l}) || die "Failed to open file handle LOG for command '/usr/bin/tail': $!";
+while (local $_ = <LOG>) {
+	chomp;
+	my %log;
+	my @cols = qw(mon mday time ip entry);
+	@log{@cols} = $_ =~ /^(\w+)\s+(\d+)\s+([\d:]{8})\s+(\S+)\s+(.+)\s*$/;
+
+	if (@log{qw(pid message user)} = $_ =~ /\b(?:remote|sshd?)\b.+\[(\d+)\]: (session (?:opened|closed) for user (\S+))/i) {
+		printf("%s %s%s\n",
+			prefix(\%log,'bold white'),
+			$log{message},
+			color('reset'),
+		);
+
+	} elsif (@log{qw(pid uid command)} = $log{entry} =~ /-?(?:bash|su): history: \[pid:(\d+)\s+uid:(\d+)\]\s+(.+)\s*$/) {
+		my $colour ||= session2colour("$log{uid}\@$log{ip}:$log{pid}");
+		printf("%s %s%s\n",
+			prefix(\%log,$colour),
+			highlight($log{command},\%highlight_words,$colour),
+			color('reset'),
+		);
+		my %sent_alert;
+		for (keys %email_words) {
+			if ($log{command} =~ /\b$_\b/) {
+				for my $to (@{$email_words{$_}}) {
+					send_alert($to,
+	"$log{time} $log{uid}\@$log{ip} [$log{pid}] $log{command}"
+	) unless exists $sent_alert{$to};
+					$sent_alert{$to} = 1;
+				}
+			}
+		}
+	}
+}
+close(LOG);
+
+exit;
+
+sub send_alert {
+	my ($to,$subject,$body) = @_;
+	$body ||= $subject;
+	if (open(EMAIL,'|-','/usr/sbin/sendmail','-t',$to)) {
+		print EMAIL qq{To: $to
+From: watchbash\@admin.gametrust.com
+Subject: $subject
+
+$body
+};
+		close(EMAIL);
+	}
+}
+
+sub highlight {
+	my ($str,$words,$colour) = @_;
+	$colour = color("reset $colour");
+	for (keys %{$words}) {
+		my $highlight = color($words->{$_});
+		$str =~ s/\b($_)\b/$highlight$1$colour/g;
+	}
+	return $str;
+}
+
+sub session2colour {
+	return $colour;
+}
+
+sub uid2user {
+	my ($host,$uid) = @_;
+	my $user = $uid;
+	return $user if !defined $host || $host !~ /^[a-z0-9\.\-\_]+$/i;
+	if (open(PASSWD,'<',"/home/system/sbin/watchbash-passwd/$host.passwd")) {
+		while (local $_ = <PASSWD>) {
+			my @passwd = split(/:/,$_);
+			if ($passwd[2] == $uid) {
+				$user = $passwd[0];
+				last;
+			}
+		}
+		close(PASSWD);
+	}
+	return $user;
+}
+
+sub prefix {
+	my ($log,$colour) = @_;
+
+	my $host = (isIP($log->{ip}) ? ip2host($log->{ip}) : $log->{ip}),
+
+	my $user = '';
+	$user = uid2user($host,$log->{uid}) if defined $log->{uid};
+	$user = 'root' if defined $user && $user eq '0';
+	$user = $log->{user} if defined $log->{user};
+
+	return sprintf("%s%s %s@%s [%s]",
+			color($colour),
+			$log->{time},
+			($user eq 'root' ?
+				color("bold $colour underline").$user.color("reset $colour") :
+				$user),
+			$host,
+			$log->{pid}
+		);
+}
+
+sub ip2host {
+	my $ip = shift;
+
+	my %ip2host = (
+		'192.168.1.98'  => 'web1-mgt.gametrust.com',
+		'192.168.1.99'  => 'web2-mgt.gametrust.com',
+		'192.168.1.100' => 'web3-mgt.gametrust.com',
+		'192.168.1.101' => 'app1-mgt.gametrust.com',
+		'192.168.1.102' => 'app2-mgt.gametrust.com',
+		'192.168.1.103' => 'app3-mgt.gametrust.com',
+		'192.168.1.209' => 'app4-mgt.gametrust.com',
+		'192.168.1.214' => 'app5-mgt.gametrust.com',
+		'192.168.1.122' => 'app6-mgt.gametrust.com',
+		'192.168.1.123' => 'app7-mgt.gametrust.com',
+		'192.168.1.124' => 'app8-mgt.gametrust.com',
+		'192.168.1.104' => 'app9-mgt.gametrust.com',
+		'192.168.1.105' => 'app10-mgt.gametrust.com',
+		'192.168.1.213' => 'tmgc-mgt.gametrust.com',
+		'192.168.1.10'  => 'staging-mgt.gametrust.com',
+		'192.168.1.208' => 'admin-mgt.gametrust.com',
+	);
+	if (defined $ip2host{$ip}) {
+		(my $host = $ip2host{$ip}) =~ s/-mgt\.gametrust\.com//;
+		return $host;
+	}
+
+	my @numbers = split(/\./, $ip);
+	my $ip_number = pack("C4", @numbers);
+	my ($host) = (gethostbyaddr($ip_number, 2))[0];
+	if (defined $host && $host) {
+		return $host;
+	} else {
+		return $ip;
+	}
+}
+
+sub isIP {
+	return 0 unless defined $_[0];
+	return 1 if $_[0] =~ /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.
+				(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.
+				(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.
+				(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/x;
+	return 0;
+}
+
+sub resolve {
+	return ip2host(@_) if isIP($_[0]);
+	return host2ip(@_);
+}
+
+sub host2ip {
+	my $host = shift;
+	my @addresses = gethostbyname($host);
+	if (@addresses > 0) {
+		@addresses = map { inet_ntoa($_) } @addresses[4 .. $#addresses];
+		return wantarray ? @addresses : $addresses[0];
+	} else {
+		return $host;
+	}
+}
+
+package Colour;
+
+sub TIESCALAR {
+	my ($class,$list_ref) = @_;
+	my @shallow_copy = map { $_ } @$list_ref;
+	return unless UNIVERSAL::isa( $list_ref, 'ARRAY' );
+	my $self = [ 0, scalar @shallow_copy, \@shallow_copy ];
+	bless $self, $class;
+}
+
+sub FETCH {
+	my $self = shift;
+	my $index = $$self[0]++;
+	$$self[0] %= $self->[1];
+	return $self->[2]->[ $index ];
+}
+
+sub STORE {
+	my ($self,$list_ref) = @_;
+	return unless ref $list_ref eq ref [];
+	return unless @$list_ref > 1;
+	$self = [ 0, scalar @$list_ref, $list_ref ];
+}
+
+1;
+
+
+
