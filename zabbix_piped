@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# Copyright (c) 2015, Nicola Worthington.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+# 3. Neither the name of the copyright holder nor the names of its contributors
+#    may be used to endorse or promote products derived from this software
+#    without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+# THE POSSIBILITY OF SUCH DAMAGE.
+
+PROG="${0##*/}"
+RUNDIR="/var/run/zabbix/$PROG"
+PIPE="$RUNDIR/$PROG.pipe"
+CONF="/etc/zabbix/zabbix_agentd.conf"
+PIDFILE="$RUNDIR/$PROG.pid"
+WAITSECS=30
+SENDER="/usr/bin/zabbix_sender"
+
+if [ -e "$PIDFILE" ] ; then
+    OTHERPID="$(head -n 1 "$PIDFILE")"
+    if [ "$?" != "0" ] ; then
+      echo "Lock failed; failed to read PID file '$PIDFILE'." >&2
+      exit 3
+    fi
+    if [ -n "$OTHERPID" ] ; then
+        if [ -d "/proc/$OTHERPID" ] ; then
+            echo "Lock failed; PID $OTHERPID is active." >&2
+            exit 3
+        else
+            echo "Removing stale lock of non-existant PID $OTHERPID." >&2
+            rm -rf --one-file-system "$RUNDIR"
+            unset OTHERPID
+        fi
+    fi
+fi
+
+if mkdir -p "$RUNDIR" &>/dev/null ; then
+    trap 'rm -rf --one-file-system "$RUNDIR"' EXIT
+    echo "$$" > "$PIDFILE"
+    trap 'echo "Killed by a signal." >&2; exit 4' SIGHUP SIGINT SIGQUIT SIGTERM
+else
+    echo "Lock failed; failed to create run directory '$RUNDIR/'." >&2
+    exit 3
+fi
+
+SELF_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SELF_FILE=$(basename $0)
+cd /
+
+if [ "$1" = "child" ] ; then
+    shift
+    umask 0
+    exec setsid $SELF_DIR/$SELF_FILE refork "$@" </dev/null >/dev/null 2>/dev/null &
+    CHILDPID="$!"
+    echo "$CHILDPID" > "$PIDFILE"
+    echo "Forked $PROG background daemon at PID $CHILDPID using input pipe" \
+         "'$PIPE'."
+    exit 0
+fi
+if [ "$1" != "refork" ] ; then
+    exec $SELF_DIR/$SELF_FILE child "$@" &
+    exit 0
+fi
+
+shift
+
+exec >  >(2>&-; logger -t "$PROG[$$]" -p user.info 2>&1)
+exec 2> >(      logger -t "$PROG[$$]" -p user.error    )
+exec 0< /dev/null
+
+echo "Forked $PROG background daemon at PID $$."
+
+while : ; do
+    if [[ ! -p "$PIPE" ]]; then
+        echo "Creating pipe '$PIPE' ..."
+        mkfifo "$PIPE"
+    fi
+
+    echo "Starting read loop for pipe '$PIPE' ..."
+    while : ; do
+        if read line < "$PIPE" ; then
+            col=( $line )
+            case ${#col[@]} in
+                4)
+                    echo "${col[@]}" >&2
+                    echo "${col[@]}"
+                    ;;
+                2)
+                    timestamp="$(date +%s)"
+                    echo "- ${col[0]} $timestamp ${col[1]}" >&2
+                    echo "- ${col[0]} $timestamp ${col[1]}"
+                    ;;
+                *)
+                    echo "Ignoring invalid input: ${col[@]}" >&2
+                    ;;
+            esac
+        fi
+    done | "$SENDER" -c "$CONF" -s "$(hostname -f)" -T -i - -r
+
+    >&2 echo "$SENDER exited with exit code $?; waiting $WAIT seconds."
+    sleep $WAIT
+done
+
