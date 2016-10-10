@@ -1,0 +1,21 @@
+#!/bin/bash
+
+main () {
+  if [[ $# -ne 1 ]] || ! [[ -f "$1" ]] ; then
+    >&2 echo "Syntax: ${0##*/} <script>"
+    return 1
+  fi
+  declare -x src="$1"
+  declare -x shbang="$(head -1 "$src" | grep -o '^#!.*')"
+  shbang="${shbang:-#!/bin/bash}"
+  cat <<FOO
+$shbang
+eval "\$(base64 -d << 'EOF' | zcat
+$(gzip -c "$src" | base64)
+EOF
+)"
+FOO
+}
+
+main "$@"
+

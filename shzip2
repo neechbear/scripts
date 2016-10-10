@@ -1,0 +1,14 @@
+#!/bin/bash
+
+main () {
+  if [[ $# -ne 1 ]] || ! [[ -f "$1" ]] ; then
+    >&2 echo "Syntax: ${0##*/} <script>"
+    return 1
+  fi
+  printf '#!/bin/bash\n'
+  printf 'eval "$(tail -n +3 "${BASH_SOURCE[0]}" | base64 -d | zcat)"; exit $?\n'
+  gzip -c "$1" | base64
+}
+
+main "$@"
+
