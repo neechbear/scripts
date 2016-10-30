@@ -22,6 +22,7 @@ populate_identity_map () {
   declare -gA df_ident=()
   declare -a illegal_chars=(, + ${!df_sigil_map[@]})
 
+  # See https://en.wikipedia.org/wiki/Uname for examples.
   df_ident["system"]="$(uname -s)"
   df_ident["system-release"]="${df_ident[system]}-$(uname -r)"
 
