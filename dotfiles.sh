@@ -126,9 +126,7 @@ available_identities () {
 
 best_file () {
   declare normalised_file="${1:-}"
-  if [[ -z "$normalised_file" ]] ; then
-    >&2 echo "Syntax: ${0##*/} <normalised_file>"; return 64
-  fi
+  [[ -z "$normalised_file" ]] && return 64
   declare -i best_weight
   declare best
   declare file
@@ -144,9 +142,7 @@ best_file () {
 
 normalised_files () {
   declare path="${1:-}"
-  if [[ -z "$path" || ! -e "$path" ]] ; then
-    >&2 echo "Syntax: ${0##*/} <path>"; return 64
-  fi
+  [[ -z "$path" || ! -e "$path" ]] && return 64
   declare -A files=()
   for file in "${path%/}"/* ; do
     files["${file%%~*}"]=1
@@ -158,21 +154,27 @@ normalised_files () {
 
 symlink_files () {
   declare path="${1:-}"
-  if [[ -z "$path" || ! -e "$path" ]] ; then
-    >&2 echo "Syntax: ${0##*/} <path>"; return 64
+  declare target="${2:-}"
+  if [[ -z "$path" || ! -e "$path" || -z "$target" || ! -e "$target" ]] ; then
+    return 64
   fi
   declare file
   while read -r file ; do
-    [[ -d "$file" ]] && continue
-    printf "Symlink '%s' to '%s'.\n" "$file" "$(best_file "$file")"
+    if [[ -d "$file" ]] ; then
+      symlink_files "$file"
+    else
+      # TODO: Use realpath --relative-to or something else to work out the best
+      #       relative paths to symlink.
+      # http://stackoverflow.com/questions/2564634/convert-absolute-path-into-relative-path-given-a-current-directory-using-bash
+      # http://unix.stackexchange.com/questions/85060/getting-relative-links-between-two-paths
+      printf "Symlink '%s' to '%s'.\n" "${target%/}/$file" "$(best_file "$file")"
+    fi
   done < <(normalised_files "$path")
 }
 
 file_weights () {
   declare path="${1:-}"
-  if [[ -z "$path" || ! -e "$path" ]] ; then
-    >&2 echo "Syntax: ${0##*/} <path>"; return 64
-  fi
+  [[ -z "$path" || ! -e "$path" ]] && return 64
   declare file
   for file in "$path"/* ; do
     printf "%d %s\n" "$(weight_of_file "$file")" "$file"
@@ -194,14 +196,25 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
       return $?
     fi
 
+    declare syntax
     declare personality="${0##*/}"
-    case "${personality,,}" in
-      available*) available_identities | sort -u ;;
-      *file*weight*) file_weights "$@" ;;
-      *symlink*file*) symlink_files "$@" ;;
-      *normali[sz]ed*file*) normalised_files "$@" ;;
-      *best*file*) best_file "$@" ;;
-    esac
+    declare -i rc=0
+    {
+      case "${personality,,}" in
+        available*) available_identities | sort -u ;;
+        *file*weight*) file_weights "$@" ;;
+        *best*file*) best_file "$@" ;;
+        *normali[sz]ed*file*) normalised_files "$@" ;;
+        *symlink*file*)
+          syntax="<src_dotfiles_path> <links_path>"
+          symlink_files "$@" ;;
+      esac
+    } || rc=$?
+
+    if [[ $rc -eq 64 ]] ; then
+      >&2 echo "Syntax: ${0##*/} ${syntax:-<path>}"
+    fi
+    return $rc
   }
 
   set -euo pipefail
