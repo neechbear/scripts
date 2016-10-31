@@ -73,13 +73,18 @@ identity_sigil () {
 weight_of_file () {
   declare file="$1"
   declare -i weight=0
+  declare -i identity_count=0
   declare ident
   for ident in $(file_identities "$file") ; do      
+    identity_count+=1
     declare -i ident_weight="$(weight_of_identity "$ident")"
     if [[ $ident_weight -gt $weight ]] ; then
       weight=$ident_weight
     fi
   done
+  if [[ $identity_count -ge 1 && $weight -eq 0 ]] ; then
+    weight=-1
+  fi
   echo -n "$weight"
 }
 
@@ -100,7 +105,11 @@ weight_of_identity () {
 }
 
 file_identities () {
-  declare file="${1#*~}"
+  declare file="$1"
+  if [[ ! "$file" =~ .+~.+ ]] ; then
+    return
+  fi
+  file="${1#*~}"
   file="${file// /}"
   declare ident
   for ident in "${file//,/ }" ; do
@@ -115,22 +124,65 @@ available_identities () {
   done
 }
 
+best_file () {
+  declare normalised_file="${1:-}"
+  if [[ -z "$normalised_file" ]] ; then
+    >&2 echo "Syntax: ${0##*/} <normalised_file>"; return 64
+  fi
+  declare -i best_weight
+  declare best
+  declare file
+  for file in "$normalised_file" "$normalised_file"~* ; do
+    declare -i weight="$(weight_of_file "$file")"
+    if [[ -z "${best:-}" || $weight -gt ${best_weight:-2} ]] ; then
+      best="$file"
+      best_weight=$weight
+    fi
+  done
+  echo "$best"
+}
+
+normalised_files () {
+  declare path="${1:-}"
+  if [[ -z "$path" || ! -e "$path" ]] ; then
+    >&2 echo "Syntax: ${0##*/} <path>"; return 64
+  fi
+  declare -A files=()
+  for file in "${path%/}"/* ; do
+    files["${file%%~*}"]=1
+  done
+  for file in "${!files[@]}" ; do
+    echo "$file"
+  done
+}
+
 symlink_files () {
-  :
+  declare path="${1:-}"
+  if [[ -z "$path" || ! -e "$path" ]] ; then
+    >&2 echo "Syntax: ${0##*/} <path>"; return 64
+  fi
+  declare file
+  while read -r file ; do
+    [[ -d "$file" ]] && continue
+    printf "Symlink '%s' to '%s'.\n" "$file" "$(best_file "$file")"
+  done < <(normalised_files "$path")
 }
 
 file_weights () {
-  declare path="${1:-$df_base}"
+  declare path="${1:-}"
+  if [[ -z "$path" || ! -e "$path" ]] ; then
+    >&2 echo "Syntax: ${0##*/} <path>"; return 64
+  fi
   declare file
-  for file in "$path"/*~* ; do
+  for file in "$path"/* ; do
     printf "%d %s\n" "$(weight_of_file "$file")" "$file"
   done
 }
 
 create_self_symlinks () {
   declare link
-  for link in available-identities show-file-weights symlink-files
-  do
+  for link in available-identities file-weights symlink-files \
+              normalised-files best-file ; do
     ln -v -f -s -T "${BASH_SOURCE[0]##*/}" "${BASH_SOURCE[0]%/*}/$link"
   done
 }
@@ -142,12 +194,13 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
       return $?
     fi
 
-    declare df_base="${BASH_SOURCE[0]%/*}"
     declare personality="${0##*/}"
     case "${personality,,}" in
       available*) available_identities | sort -u ;;
       *file*weight*) file_weights "$@" ;;
       *symlink*file*) symlink_files "$@" ;;
+      *normali[sz]ed*file*) normalised_files "$@" ;;
+      *best*file*) best_file "$@" ;;
     esac
   }
 
