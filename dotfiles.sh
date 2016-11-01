@@ -6,7 +6,7 @@ declare -gA df_sigil_map=(
   )
 
 declare -gA df_weight_map=(
-    ["hostname-full"]=20,
+    ["hostname-full"]=20
     ["hostname-short"]=8
     ["distrib-release"]=5
     ["distrib-codename"]=5
@@ -160,14 +160,13 @@ symlink_files () {
   fi
   declare file
   while read -r file ; do
-    if [[ -d "$file" ]] ; then
-      symlink_files "$file"
+    if [[ -d "$file" ]] && ! compgen -G "$file~*" >/dev/null ; then
+      symlink_files "$file" "$target"
     else
-      # TODO: Use realpath --relative-to or something else to work out the best
-      #       relative paths to symlink.
-      # http://stackoverflow.com/questions/2564634/convert-absolute-path-into-relative-path-given-a-current-directory-using-bash
-      # http://unix.stackexchange.com/questions/85060/getting-relative-links-between-two-paths
-      printf "Symlink '%s' to '%s'.\n" "${target%/}/$file" "$(best_file "$file")"
+      declare link_name="${target%/}/$file"
+      declare link_target="$(best_file "$file")"
+      declare relative_link_target="$(relative_path "$link_name" "$link_target")"
+      ln -v -s -f "$(readlink -m "$link_name")" "$relative_link_target"
     fi
   done < <(normalised_files "$path")
 }
@@ -184,9 +183,59 @@ file_weights () {
 create_self_symlinks () {
   declare link
   for link in available-identities file-weights symlink-files \
-              normalised-files best-file ; do
+              normalised-files best-file relative-path ; do
     ln -v -f -s -T "${BASH_SOURCE[0]##*/}" "${BASH_SOURCE[0]%/*}/$link"
   done
+}
+
+relative_path () {
+  # http://stackoverflow.com/questions/2564634/convert-absolute-path-into-relative-path-given-a-current-directory-using-bash
+  declare source="$(readlink -m "${1:-}")"
+  declare target="$(readlink -m "${2:-}")"
+  [[ -z "$source" || -z "$target" ]] && return 64
+
+  # When working with files, remove the file parts to calculate relative paths
+  # only. We will append the file to the calculated path at the end.
+  declare source_path="$source"
+  declare target_path="$target"
+  if [[ ! -d "$target" ]] ; then
+    source_path="${source_path%/*}"
+    target_path="${target_path%/*}"
+  fi
+
+  declare common_part="$source_path" # for now
+  declare result="" # for now
+  while [[ "${target_path#$common_part}" == "$target_path" ]] ; do
+    # No match, means that candidate common part is not correct.
+    # Go up one level (reduce common part).
+    common_part="$(dirname $common_part)"
+    # Record that we went back, with correct / handling.
+    if [[ -z "$result" ]]; then
+      result=".."
+    else
+      result="../$result"
+    fi
+  done
+
+  if [[ $common_part == "/" ]]; then
+    # Special case for root (no common path).
+    result="$result/"
+  fi
+
+  # Since we now have identified the common part, compute the non-common part.
+  forward_part="${target_path#$common_part}"
+
+  # Now stick all parts together.
+  if [[ -n "$result" ]] && [[ -n "$forward_part" ]]; then
+    result="$result$forward_part"
+  elif [[ -n "$forward_part" ]]; then
+    # Extra slash removal.
+    result="${forward_part:1}"
+  fi
+  # Append the filename to the resulting path if the target is a file vs dir.
+  result="${result}${target#$target_path}"
+
+  echo "$result"
 }
 
 if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; then
@@ -202,10 +251,13 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
     {
       case "${personality,,}" in
         available*) available_identities | sort -u ;;
-        *file*weight*) file_weights "$@" ;;
-        *best*file*) best_file "$@" ;;
-        *normali[sz]ed*file*) normalised_files "$@" ;;
-        *symlink*file*)
+        file-weight) file_weights "$@" ;;
+        best-file) best_file "$@" ;;
+        normali[sz]ed-file*) normalised_files "$@" ;;
+        relative-path)
+          syntax="<source_path> <target_path>"
+          relative_path "$@" ;;
+        symlink-file*)
           syntax="<src_dotfiles_path> <links_path>"
           symlink_files "$@" ;;
       esac
@@ -219,6 +271,7 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
 
   set -euo pipefail
   shopt -s nullglob
+  #trap caller ERR
   main "$@"
   exit $?
 fi
