@@ -179,6 +179,10 @@ symlink_files () {
   if [[ -z "$path" || ! -e "$path" || -z "$target" ]] ; then
     return 64
   fi
+  if [[ "$target" =~ ^$path(/|$) ]] ; then
+    return 2
+  fi
+
   declare file
   while read -r file ; do
     if [[ -d "$file" ]] && ! compgen -G "$file~*" >/dev/null ; then
