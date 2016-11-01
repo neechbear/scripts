@@ -152,6 +152,24 @@ normalised_files () {
   done
 }
 
+file_weights () {
+  declare path="${1:-}"
+  [[ -z "$path" || ! -e "$path" ]] && return 64
+  declare file
+  for file in "$path"/* ; do
+    printf "%d %s\n" "$(weight_of_file "$file")" "$file"
+  done
+}
+
+create_self_symlinks () {
+  declare prefix="dotfiles-"
+  declare link
+  for link in available-identities file-weights symlink-files \
+              normalised-files best-file relative-path ; do
+    ln -v -f -s -T "${BASH_SOURCE[0]##*/}" "${BASH_SOURCE[0]%/*}/${prefix}$link"
+  done
+}
+
 symlink_files () {
   declare path="${1:-}"
   declare target="${2:-}"
@@ -166,46 +184,35 @@ symlink_files () {
       declare link_name="${target%/}/$file"
       declare link_target="$(best_file "$file")"
       declare relative_link_target="$(relative_path "$link_name" "$link_target")"
-      ln -v -s -f "$(readlink -m "$link_name")" "$relative_link_target"
+      ln -v -s -T "$relative_link_target" "$(readlink -m "$link_name")"
     fi
   done < <(normalised_files "$path")
 }
 
-file_weights () {
-  declare path="${1:-}"
-  [[ -z "$path" || ! -e "$path" ]] && return 64
-  declare file
-  for file in "$path"/* ; do
-    printf "%d %s\n" "$(weight_of_file "$file")" "$file"
-  done
-}
-
-create_self_symlinks () {
-  declare link
-  for link in available-identities file-weights symlink-files \
-              normalised-files best-file relative-path ; do
-    ln -v -f -s -T "${BASH_SOURCE[0]##*/}" "${BASH_SOURCE[0]%/*}/$link"
-  done
-}
-
 relative_path () {
   # http://stackoverflow.com/questions/2564634/convert-absolute-path-into-relative-path-given-a-current-directory-using-bash
-  declare source="$(readlink -m "${1:-}")"
-  declare target="$(readlink -m "${2:-}")"
-  [[ -z "$source" || -z "$target" ]] && return 64
+  declare src="${1:-}"
+  declare tgt="${2:-}"
+  [[ -z "$src" || -z "$tgt" ]] && return 64
 
   # When working with files, remove the file parts to calculate relative paths
   # only. We will append the file to the calculated path at the end.
-  declare source_path="$source"
-  declare target_path="$target"
-  if [[ ! -d "$target" ]] ; then
-    source_path="${source_path%/*}"
-    target_path="${target_path%/*}"
+  declare src_path="$src"
+  declare tgt_path="$tgt"
+  if [[ ! -d "$tgt" ]] ; then
+    src_path="${src_path%/*}"
+    tgt_path="${tgt_path%/*}"
   fi
 
-  declare common_part="$source_path" # for now
+  # Only resolve paths once we have stripped any filename from the end. This
+  # prevents cyclic symlinks if we're resolving a src that is already a symlink
+  # to the target.
+  src_path="$(readlink -m "$src_path")"
+  tgt_path="$(readlink -m "$tgt_path")"
+
+  declare common_part="$src_path" # for now
   declare result="" # for now
-  while [[ "${target_path#$common_part}" == "$target_path" ]] ; do
+  while [[ "${tgt_path#$common_part}" == "$tgt_path" ]] ; do
     # No match, means that candidate common part is not correct.
     # Go up one level (reduce common part).
     common_part="$(dirname $common_part)"
@@ -223,7 +230,7 @@ relative_path () {
   fi
 
   # Since we now have identified the common part, compute the non-common part.
-  forward_part="${target_path#$common_part}"
+  forward_part="${tgt_path#$common_part}"
 
   # Now stick all parts together.
   if [[ -n "$result" ]] && [[ -n "$forward_part" ]]; then
@@ -233,7 +240,7 @@ relative_path () {
     result="${forward_part:1}"
   fi
   # Append the filename to the resulting path if the target is a file vs dir.
-  result="${result}${target#$target_path}"
+  result="${result%/}/${tgt##*/}"
 
   echo "$result"
 }
@@ -250,14 +257,14 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
     declare -i rc=0
     {
       case "${personality,,}" in
-        available*) available_identities | sort -u ;;
-        file-weight) file_weights "$@" ;;
-        best-file) best_file "$@" ;;
-        normali[sz]ed-file*) normalised_files "$@" ;;
-        relative-path)
+        *available*) available_identities | sort -u ;;
+        *file-weight) file_weights "$@" ;;
+        *best-file) best_file "$@" ;;
+        *normali[sz]ed-file*) normalised_files "$@" ;;
+        *relative-path)
           syntax="<source_path> <target_path>"
           relative_path "$@" ;;
-        symlink-file*)
+        *symlink-file*)
           syntax="<src_dotfiles_path> <links_path>"
           symlink_files "$@" ;;
       esac
