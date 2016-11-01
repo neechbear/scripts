@@ -127,17 +127,20 @@ available_identities () {
 best_file () {
   declare normalised_file="${1:-}"
   [[ -z "$normalised_file" ]] && return 64
-  declare -i best_weight
+  declare -i best_weight=-2
   declare best
   declare file
   for file in "$normalised_file" "$normalised_file"~* ; do
+    [[ ! -e "$file" ]] && continue
     declare -i weight="$(weight_of_file "$file")"
-    if [[ -z "${best:-}" || $weight -gt ${best_weight:-2} ]] ; then
+    if [[ -z "${best:-}" || $weight -gt $best_weight ]] ; then
       best="$file"
       best_weight=$weight
     fi
   done
-  echo "$best"
+  if [[ $best_weight -ge 0 ]] && [[ -n "${best:-}" ]] ; then
+    echo "$best"
+  fi
 }
 
 normalised_files () {
@@ -165,57 +168,55 @@ create_self_symlinks () {
   declare prefix="dotfiles-"
   declare link
   for link in available-identities file-weights symlink-files \
-              normalised-files best-file relative-path ; do
+              normalised-files best-file ; do
     ln -v -f -s -T "${BASH_SOURCE[0]##*/}" "${BASH_SOURCE[0]%/*}/${prefix}$link"
   done
 }
 
 symlink_files () {
-  declare path="${1:-}"
-  declare target="${2:-}"
-  if [[ -z "$path" || ! -e "$path" || -z "$target" || ! -e "$target" ]] ; then
+  declare path="$(readlink -f "${1:-}")"
+  declare target="$(readlink -f "${2:-}")"
+  if [[ -z "$path" || ! -e "$path" || -z "$target" ]] ; then
     return 64
   fi
   declare file
   while read -r file ; do
     if [[ -d "$file" ]] && ! compgen -G "$file~*" >/dev/null ; then
-      symlink_files "$file" "$target"
+      symlink_files "$file" "${target%/}/${file##*/}"
     else
-      declare link_name="${target%/}/$file"
+      declare link_name="${target%/}/${file##*/}"
       declare link_target="$(best_file "$file")"
-      declare relative_link_target="$(relative_path "$link_name" "$link_target")"
-      ln -v -s -T "$relative_link_target" "$(readlink -m "$link_name")"
+      [[ -z "$link_target" ]] && continue
+      declare relative_link_target="$(relative_file "$link_name" "$link_target")"
+      [[ -h "$link_name" ]] && rm -v "$link_name"
+      [[ ! -d "$(dirname "$link_name")" ]] && mkdir -p "$(dirname "$link_name")" 
+      ln -v -s -T "$relative_link_target" "$link_name"
     fi
   done < <(normalised_files "$path")
 }
 
-relative_path () {
-  # http://stackoverflow.com/questions/2564634/convert-absolute-path-into-relative-path-given-a-current-directory-using-bash
+relative_file () {
   declare src="${1:-}"
   declare tgt="${2:-}"
   [[ -z "$src" || -z "$tgt" ]] && return 64
+  declare rel_path="$(relative_path "$(dirname "$src")" "$(dirname "$tgt")")"
+  rel_path="${rel_path%/}"
+  echo "${rel_path:+$rel_path/}${tgt##*/}"
+}
 
-  # When working with files, remove the file parts to calculate relative paths
-  # only. We will append the file to the calculated path at the end.
-  declare src_path="$src"
-  declare tgt_path="$tgt"
-  if [[ ! -d "$tgt" ]] ; then
-    src_path="${src_path%/*}"
-    tgt_path="${tgt_path%/*}"
-  fi
+relative_path () {
+  # http://stackoverflow.com/questions/2564634/convert-absolute-path-into-relative-path-given-a-current-directory-using-bash
+  declare src="$(readlink -m "${1:-}")"
+  declare tgt="$(readlink -m "${2:-}")"
+  [[ -z "$src" || -z "$tgt" ]] && return 64
 
-  # Only resolve paths once we have stripped any filename from the end. This
-  # prevents cyclic symlinks if we're resolving a src that is already a symlink
-  # to the target.
-  src_path="$(readlink -m "$src_path")"
-  tgt_path="$(readlink -m "$tgt_path")"
-
-  declare common_part="$src_path" # for now
+  declare common_part="$src" # for now
   declare result="" # for now
-  while [[ "${tgt_path#$common_part}" == "$tgt_path" ]] ; do
+  while [[ "${tgt#$common_part}" == "$tgt" ]] ; do
     # No match, means that candidate common part is not correct.
     # Go up one level (reduce common part).
-    common_part="$(dirname $common_part)"
+    common_part="${common_part%/*}"
+    [[ -z "$common_part" ]] && common_part="/"
     # Record that we went back, with correct / handling.
     if [[ -z "$result" ]]; then
       result=".."
@@ -230,7 +231,7 @@ relative_path () {
   fi
 
   # Since we now have identified the common part, compute the non-common part.
-  forward_part="${tgt_path#$common_part}"
+  declare forward_part="${tgt#$common_part}"
 
   # Now stick all parts together.
   if [[ -n "$result" ]] && [[ -n "$forward_part" ]]; then
@@ -239,8 +240,6 @@ relative_path () {
     # Extra slash removal.
     result="${forward_part:1}"
   fi
-  # Append the filename to the resulting path if the target is a file vs dir.
-  result="${result%/}/${tgt##*/}"
 
   echo "$result"
 }
@@ -258,12 +257,9 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
     {
       case "${personality,,}" in
         *available*) available_identities | sort -u ;;
-        *file-weight) file_weights "$@" ;;
+        *file-weight*) file_weights "$@" ;;
         *best-file) best_file "$@" ;;
         *normali[sz]ed-file*) normalised_files "$@" ;;
-        *relative-path)
-          syntax="<source_path> <target_path>"
-          relative_path "$@" ;;
         *symlink-file*)
           syntax="<src_dotfiles_path> <links_path>"
           symlink_files "$@" ;;
@@ -282,4 +278,44 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
   main "$@"
   exit $?
 fi
+
+__relative_unit_tests () {
+  while read -r src tgt result ; do
+    eval "assert 'relative_path \"$src\" \"$tgt\"' '$result'"
+    printf '%-40s = "%s"\n' \
+      "$(printf 'relative_path "%s" "%s"' "$src" "$tgt")" \
+      "$(eval "relative_path \"$src\" \"$tgt\" '$result'")"
+  done <<EOF
+/A/B/C /A         ../..
+/A/B/C /A/B       ..
+/A/B/C /A/B/C
+/A/B/C /A/B/C/D   D
+/A/B/C /A/B/C/D/E D/E
+/A/B/C /A/B/D     ../D
+/A/B/C /A/B/D/E   ../D/E
+/A/B/C /A/D       ../../D
+/A/B/C /A/D/E     ../../D/E
+/A/B/C /D/E/F     ../../../D/E/F
+EOF
+
+  while read -r src tgt result ; do
+    eval "assert 'relative_file \"$src\" \"$tgt\"' '$result'"
+    printf '%-40s = "%s"\n' \
+      "$(printf 'relative_file "%s" "%s"' "$src" "$tgt")" \
+      "$(eval "relative_file \"$src\" \"$tgt\" '$result'")"
+  done <<EOF
+/A/B/C /A         ../../A
+/A/B/C /A/B       ../B
+/A/B/C /A/B/C     C
+/A/B/C /A/B/C/D   C/D
+/A/B/C /A/B/C/D/E C/D/E
+/A/B/C /A/B/D     D
+/A/B/C /A/B/D/E   D/E
+/A/B/C /A/D       ../D
+/A/B/C /A/D/E     ../D/E
+/A/B/C /D/E/F     ../../D/E/F
+EOF
+
+  assert_end "${BASH_SOURCE[0]##*/}"
+}
 
