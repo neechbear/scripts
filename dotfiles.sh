@@ -273,7 +273,7 @@ if [[ "$(readlink -f -- "${BASH_SOURCE[0]}")" = "$(readlink -f -- "$0")" ]] ; th
   }
 
   set -euo pipefail
-  shopt -s nullglob
+  shopt -s nullglob dotglob
   #trap caller ERR
   main "$@"
   exit $?
