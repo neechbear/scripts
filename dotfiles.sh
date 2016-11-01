@@ -176,11 +176,9 @@ create_self_symlinks () {
 symlink_files () {
   declare path="$(readlink -f "${1:-}")"
   declare target="$(readlink -f "${2:-}")"
-  if [[ -z "$path" || ! -e "$path" || -z "$target" ]] ; then
+  if [[ -z "$path" || ! -e "$path" || -z "$target" \
+                   || "$target" =~ ^$path(/|$) ]] ; then
     return 64
-  fi
-  if [[ "$target" =~ ^$path(/|$) ]] ; then
-    return 2
   fi
 
   declare file
